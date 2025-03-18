@@ -35,6 +35,8 @@ from typing import Any
 from langchain_core.callbacks import CallbackManagerForRetrieverRun
 from langchain_core.retrievers import BaseRetriever
 
+from open_webui.config import  OPENAI_EMBEDDINGS_API_VERSION
+
 
 class VectorSearchRetriever(BaseRetriever):
     collection_name: Any
@@ -557,10 +559,11 @@ def generate_openai_batch_embeddings(
 ) -> Optional[list[list[float]]]:
     try:
         r = requests.post(
-            f"{url}/embeddings",
+            f"{url}/embeddings?api-version={OPENAI_EMBEDDINGS_API_VERSION}",
             headers={
                 "Content-Type": "application/json",
-                "Authorization": f"Bearer {key}",
+                "api-key": key,
+                # "Authorization": f"Bearer {key}",
                 **(
                     {
                         "X-OpenWebUI-User-Name": user.name,
