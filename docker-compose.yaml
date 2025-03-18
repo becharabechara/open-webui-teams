@@ -14,21 +14,40 @@ services:
       args:
         OLLAMA_BASE_URL: '/ollama'
       dockerfile: Dockerfile
-    image: ghcr.io/open-webui/open-webui:${WEBUI_DOCKER_TAG-main}
+    image: open-webui:v0.3.1
+    #image: ghcr.io/open-webui/open-webui:${WEBUI_DOCKER_TAG-main}
     container_name: open-webui
     volumes:
       - open-webui:/app/backend/data
     depends_on:
       - ollama
+      - qdrant
     ports:
       - ${OPEN_WEBUI_PORT-3000}:8080
+    env_file:
+      - .env
     environment:
       - 'OLLAMA_BASE_URL=http://ollama:11434'
       - 'WEBUI_SECRET_KEY='
     extra_hosts:
       - host.docker.internal:host-gateway
+      - api-dev.tikehaucapital.com:192.168.10.53  # Direct IP mapping as fallback
+    dns:
+      - 192.168.10.10  # Your local DNS server for internal resolution
+      - 8.8.8.8       # Fallback to Google DNS
     restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant
+    container_name: qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
 
 volumes:
   ollama: {}
   open-webui: {}
+  qdrant_data: {}
