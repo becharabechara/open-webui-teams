@@ -2,7 +2,7 @@
 title: Lagoon API Pipeline
 author: becharabechara
 author_url: https://github.com/bbechara-tikehaucapital
-version: 0.3.0
+version: 0.3.1
 license: MIT
 description: A pipeline for communicating with Lagoon API Exposed via Archipel
 features:
@@ -19,17 +19,15 @@ v0.2.0 - Moez:
 v0.3.1 - bechara:
   - All calls are send to Lagoon API
   - Env Variables aren't set by default
+  - Detection of Web Search Tool And Boolean added to Payload
 """
 
-# import requests
-# Moez
 from typing import Union, AsyncGenerator, Dict, Any, Optional, List
 import asyncio
 import traceback
 import httpx
 import json
 import os
-from typing import Dict, Any
 from pydantic import BaseModel, Field
 import logging
 import urllib3
@@ -43,15 +41,15 @@ logger = logging.getLogger(__name__)
 class UserValves(BaseModel):
     lagoon_api_taskendpoint: str = Field(
         default=os.getenv(
-           "LAGOON_API_TASKENDPOINT",
-           "https://api-dev.tikehaucapital.com/lagoon/api/chatv2/taskopenwebui",
+            "LAGOON_API_TASKENDPOINT",
+            "https://api-dev.tikehaucapital.com/lagoon/api/chatv2/taskopenwebui",
         ),
         description="Lagoon API endpoint",
     )
     lagoon_api_endpoint: str = Field(
         default=os.getenv(
-           "LAGOON_API_ENDPOINT",
-           "https://api-dev.tikehaucapital.com/lagoon/api/chatv2/chatopenwebuistreaming",
+            "LAGOON_API_ENDPOINT",
+            "https://api-dev.tikehaucapital.com/lagoon/api/chatv2/chatopenwebuistreaming",
         ),
         description="Lagoon API endpoint",
     )
@@ -83,10 +81,12 @@ class Pipe:
         __user__: Dict[str, Any] = None,
         __request__: Request = None,
         __event_emitter__=None,
+        __task__=None,
+        __metadata__=None,
     ):
         """Make the pipe callable for Open WebUI."""
         return self.pipe(
-            body, __user__, __request__, __event_emitter__, __source_context__
+            body, __user__, __request__, __event_emitter__, __task__, __metadata__
         )
 
     async def pipe(
@@ -96,6 +96,7 @@ class Pipe:
         __request__: Request = None,
         __event_emitter__=None,
         __task__=None,
+        __metadata__: Dict[str, Any] = None,
     ) -> Union[str, AsyncGenerator[str, None], Dict[str, Any]]:
         """Custom pipe that processes user messages and communicates with the Lagoon API."""
         try:
@@ -113,14 +114,18 @@ class Pipe:
                 }
                 return
 
-            # Extract the latest prompt and history
+            # Extract WebSearchActivated from __metadata__['features']['web_search']
+            web_search_activated = False  # Default value
+            if __metadata__ and "features" in __metadata__:
+                web_search_activated = __metadata__["features"].get("web_search", False)
+
+            # Prepare message history
             history = self._prepare_history(messages)
 
             # Handle task if present
             if __task__:
-                #logger.info(f"Task: {__task__}")
                 result = await self._process_task(
-                    user_email, history, __event_emitter__
+                    user_email, history, web_search_activated, __event_emitter__
                 )
                 yield result
                 return
@@ -134,13 +139,9 @@ class Pipe:
                     }
                 )
 
-            # logger.info(body.get("messages"))
-            # Moez
-            history = self._prepare_history(messages)
-
             # Make API call and stream response
             async for chunk in self._stream_api_response(
-                user_email, history, __event_emitter__
+                user_email, history, web_search_activated, __event_emitter__
             ):
                 yield chunk
 
@@ -149,7 +150,6 @@ class Pipe:
         except Exception as e:
             yield await self._handle_error(e, "Unexpected error", __event_emitter__)
         finally:
-            # Always send the final "done" status, even if an error occurs
             if __event_emitter__:
                 await __event_emitter__(
                     {
@@ -210,11 +210,17 @@ class Pipe:
             for msg in messages
         ]
 
-    async def _process_task(self, user_email, history, __event_emitter__):
+    async def _process_task(
+        self, user_email, history, web_search_activated, __event_emitter__
+    ):
         """Process internal tasks (title/tags generation)."""
         try:
-            # Prepare payload with user email and message history
-            payload = {"User": user_email, "Messages": history}
+            # Prepare payload with user email, message history, and web search status
+            payload = {
+                "User": user_email,
+                "Messages": history,
+                "WebSearchActivated": web_search_activated,
+            }
             headers = {"Content-Type": "application/json"}
             api_taskendpoint = self.valves.lagoon_api_taskendpoint
 
@@ -230,10 +236,16 @@ class Pipe:
         except Exception:
             return ""
 
-    async def _stream_api_response(self, user_email, history, __event_emitter__):
+    async def _stream_api_response(
+        self, user_email, history, web_search_activated, __event_emitter__
+    ):
         """Stream the API response to the client."""
         # Prepare payload and headers
-        payload = {"User": user_email, "Messages": history}
+        payload = {
+            "User": user_email,
+            "Messages": history,
+            "WebSearchActivated": web_search_activated,
+        }
         headers = {
             "Accept": "text/plain",
             "Content-Type": "application/json; charset=utf-8",
