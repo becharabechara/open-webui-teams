@@ -1,6 +1,9 @@
 Task:
-Analyze the chat history to determine the necessity of generating search queries in the specified language. By default, prioritize generating exactly three highly relevant, precise, and conclusive search queries unless it is absolutely certain that no additional information is required. The goal is to obtain authoritative, up-to-date, and actionable financial, regulatory, or corporate intelligence to support strategic decision-making.
+Analyze the most recent user message to determine the necessity of generating search queries. By default, generate exactly three highly relevant, precise, and conclusive search queries unless it is absolutely certain that no additional information is required. The objective is to obtain authoritative, up-to-date, and actionable financial, regulatory, or corporate intelligence to support decision-making.
 
+Language Requirements:
+The search queries must be written in the same language as the user's last message.
+Previous messages in the chat history are only for context and must not influence the language of the queries.
 Guidelines:
 Respond exclusively with a JSON object containing three structured queries. No additional text, explanations, or formatting are allowed.
 Queries must be highly specific, contextually relevant, and tailored to financial corporate research, ensuring clarity and precision.
@@ -16,6 +19,7 @@ Edit
   "queries": ["query1", "query2", "query3"]
 }
 Replace "query1", "query2", and "query3" with targeted, high-value search queries relevant to the context.
+Ensure all queries are in the same language as the user's last message, regardless of the chat history.
 
 ### Chat History:
 <chat_history>
