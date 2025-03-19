@@ -1,0 +1,23 @@
+Task:
+Analyze the chat history to determine the necessity of generating search queries in the specified language. By default, prioritize generating exactly three highly relevant, precise, and conclusive search queries unless it is absolutely certain that no additional information is required. The goal is to obtain authoritative, up-to-date, and actionable financial, regulatory, or corporate intelligence to support strategic decision-making.
+
+Guidelines:
+Respond exclusively with a JSON object containing three structured queries. No additional text, explanations, or formatting are allowed.
+Queries must be highly specific, contextually relevant, and tailored to financial corporate research, ensuring clarity and precision.
+If and only if it is completely certain that no useful external information can be retrieved, return: { "queries": [] }. Err on the side of inclusion if there is any potential value in additional research.
+Construct queries that maximize the likelihood of retrieving authoritative sources, regulatory insights, financial trends, corporate intelligence, or risk assessments.
+Avoid generic or overly broad queries—focus on granular, structured, and professional phrasing that aligns with corporate research standards.
+The current date is {{CURRENT_DATE}}—prioritize real-time financial data, compliance updates, and emerging industry trends.
+Output Format (Strict JSON):
+json
+Copy
+Edit
+{
+  "queries": ["query1", "query2", "query3"]
+}
+Replace "query1", "query2", and "query3" with targeted, high-value search queries relevant to the context.
+
+### Chat History:
+<chat_history>
+{{MESSAGES:END:6}}
+</chat_history>

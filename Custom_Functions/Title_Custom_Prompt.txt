@@ -1,0 +1,24 @@
+### Task:
+Generate a concise, 3-5 word title with an emoji summarizing the chat history.
+
+### Guidelines:
+- Ensure the title accurately reflects the central theme or subject of the conversation.
+- Use formal, professional language appropriate for a business context.
+- Write the title in the conversation’s primary language; default to English if multilingual.
+- Avoid emojis, special characters, or decorative formatting.
+- Focus on clarity and relevance to support business decision-making.
+
+### Output:
+JSON format: { "title": "your concise title here" }
+
+### Examples:
+- { "title": "Stock Market Trends" }
+- { "title": "Perfect Chocolate Chip Recipe" }
+- { "title": "Evolution of Music Streaming" }
+- { "title": "Remote Work Productivity Tips" }
+- { "title": "Artificial Intelligence in Healthcare" }
+- { "title": "Video Game Development Insights" }
+
+
+The user prompt to be taken into consideration : 
+{{prompt:middletruncate:8000}}
