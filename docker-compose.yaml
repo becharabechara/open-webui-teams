@@ -22,11 +22,22 @@ services:
       - ollama
     ports:
       - ${OPEN_WEBUI_PORT-3000}:8080
-    environment:
-      - 'OLLAMA_BASE_URL=http://ollama:11434'
-      - 'WEBUI_SECRET_KEY='
+    env_file:
+      - .env
     extra_hosts:
       - host.docker.internal:host-gateway
+    restart: unless-stopped
+
+  ngrok:
+    image: ngrok/ngrok:latest
+    container_name: ngrok
+    env_file:
+      - .env
+    command: "http open-webui:8080 --domain=${NGROK_DOMAIN}"
+    ports:
+      - "4040:4040"  # Optional: Expose ngrok dashboard
+    depends_on:
+      - open-webui
     restart: unless-stopped
 
 volumes:
