@@ -1457,6 +1457,120 @@ def swagger_ui_html(*args, **kwargs):
 
 applications.get_swagger_ui_html = swagger_ui_html
 
+##########################################################################
+# Microsoft Teams SSO Applicationn Integration
+##########################################################################
+
+from fastapi import HTTPException, Request, Response, Body
+from starlette.responses import FileResponse
+from starlette.responses import RedirectResponse
+import requests
+import logging
+import uuid
+import secrets
+import os
+from open_webui.utils.oauth import OAuthManager, auth_manager_config
+from open_webui.models.users import Users
+from open_webui.utils.auth import get_password_hash
+
+log = logging.getLogger(__name__)
+
+@app.post("/api/teams/auth")
+async def teams_auth_api(request: Request, response: Response, data: dict = Body(...)):
+    log.debug("Received POST to /api/teams/auth")
+    teams_token = data.get("token")
+    if not teams_token:
+        log.warning("No Teams token provided")
+        raise HTTPException(400, detail="No token provided")
+
+    redirect_uri = f"{app.state.config.WEBUI_URL}/teams"
+    token_url = f"https://login.microsoftonline.com/{os.getenv('MICROSOFT_CLIENT_TENANT_ID')}/oauth2/v2.0/token"
+    payload = {
+        "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+        "assertion": teams_token,
+        "client_id": os.getenv("MICROSOFT_CLIENT_ID"),
+        "client_secret": os.getenv("MICROSOFT_CLIENT_SECRET"),
+        "scope": "openid profile email User.Read",
+        "requested_token_use": "on_behalf_of",
+        "redirect_uri": redirect_uri,
+    }
+
+    try:
+        token_response = requests.post(token_url, data=payload)
+        token_response.raise_for_status()
+        token_data = token_response.json()
+
+        request.session["access_token"] = token_data.get("access_token")
+        request.session["id_token"] = token_data.get("id_token")
+
+        client = oauth_manager.get_client("microsoft")
+        user_data = await client.userinfo(token=token_data)
+
+        sub = user_data.get("sub")
+        if not sub:
+            log.warning(f"Teams SSO failed, sub is missing: {user_data}")
+            raise HTTPException(400, detail="Invalid credentials")
+        provider_sub = f"microsoft@{sub}"
+        email = user_data.get(auth_manager_config.OAUTH_EMAIL_CLAIM, "").lower()
+        if not email:
+            log.warning(f"Teams SSO failed, email is missing: {user_data}")
+            raise HTTPException(400, detail="Invalid credentials")
+
+        user = Users.get_user_by_oauth_sub(provider_sub)
+        if not user and auth_manager_config.OAUTH_MERGE_ACCOUNTS_BY_EMAIL:
+            user = Users.get_user_by_email(email)
+            if user:
+                Users.update_user_oauth_sub_by_id(user.id, provider_sub)
+
+        role = oauth_manager.get_user_role(user, user_data)
+
+        if not user:
+            if not auth_manager_config.ENABLE_OAUTH_SIGNUP:
+                raise HTTPException(403, detail="Access prohibited")
+            picture_url = user_data.get(auth_manager_config.OAUTH_PICTURE_CLAIM, "/user.png")
+            name = user_data.get(auth_manager_config.OAUTH_USERNAME_CLAIM, email.split("@")[0])
+            user = Users.insert_new_user(
+                id=str(uuid.uuid4()),
+                email=email,
+                name=name,
+                profile_image_url=picture_url,
+                role=role,
+                oauth_sub=provider_sub,
+            )
+            log.debug(f"Created new user: {email}")
+        else:
+            if user.role != role:
+                Users.update_user_role_by_id(user.id, role)
+            Users.update_user_by_id(user.id, {"last_active_at": int(time.time())})
+            log.debug(f"Updated existing user: {email}")
+
+        request.session["user"] = {
+            "id": user.id,
+            "email": user.email,
+            "name": user.name,
+            "role": user.role,
+            "profile_image_url": user.profile_image_url,
+            "last_active_at": user.last_active_at,
+            "updated_at": user.updated_at,
+            "created_at": user.created_at,
+        }
+        Session.commit()
+
+        # Generate a JWT token for the frontend
+        token = decode_token.sign(
+            {"id": user.id, "email": user.email, "role": user.role},
+            WEBUI_SECRET_KEY,
+            app.state.config.JWT_EXPIRES_IN,
+        )
+        log.debug("Teams SSO successful, returning user data")
+        return {"id": user.id, "email": user.email, "name": user.name, "role": user.role, "token": token}
+    except requests.exceptions.RequestException as e:
+        log.error(f"Teams token exchange failed: {str(e)}")
+        raise HTTPException(401, detail="Token exchange failed")
+    except Exception as e:
+        log.error(f"Unexpected error in teams_auth_api: {str(e)}", exc_info=True)
+        raise HTTPException(500, detail="Internal server error")
+    
 if os.path.exists(FRONTEND_BUILD_DIR):
     mimetypes.add_type("text/javascript", ".js")
     app.mount(
