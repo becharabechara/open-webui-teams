@@ -15,7 +15,8 @@ services:
         OLLAMA_BASE_URL: '/ollama'
       dockerfile: Dockerfile
     image: open-webui:v0.3.3
-    #image: ghcr.io/open-webui/open-webui:${WEBUI_DOCKER_TAG-main}
+    # Uncomment if you prefer a pre-built image instead of building locally
+    # image: ghcr.io/open-webui/open-webui:${WEBUI_DOCKER_TAG-main}
     container_name: open-webui
     volumes:
       - open-webui:/app/backend/data
@@ -27,8 +28,8 @@ services:
     env_file:
       - .env
     environment:
-      - 'OLLAMA_BASE_URL=http://ollama:11434'
-      - 'WEBUI_SECRET_KEY='
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY}
     extra_hosts:
       - host.docker.internal:host-gateway
       - api-dev.tikehaucapital.com:192.168.10.53  # Direct IP mapping as fallback
@@ -46,6 +47,18 @@ services:
       - "6334:6334"
     volumes:
       - qdrant_data:/qdrant/storage
+
+  ngrok:
+    image: ngrok/ngrok:latest
+    container_name: ngrok
+    env_file:
+      - .env
+    command: "http open-webui:8080 --domain=${NGROK_DOMAIN}"
+    ports:
+      - "4040:4040"  # Optional: Expose ngrok dashboard
+    depends_on:
+      - open-webui
+    restart: unless-stopped
 
 volumes:
   ollama: {}
