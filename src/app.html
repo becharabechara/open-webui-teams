@@ -101,7 +101,29 @@
 			})();
 		</script>
 		<!-- Add Microsoft Teams SDK -->
-		<script src="https://statics.teams.cdn.office.net/sdk/v1.11.0/js/MicrosoftTeams.min.js" defer></script>
+		<script src="https://res.cdn.office.net/teams-js/2.36.0/js/MicrosoftTeams.min.js" defer ></script>
+		<script>
+			if (
+				window.parent !== window ||
+				window.location.hostname.includes('teams.microsoft.com')
+			) {
+				if (typeof microsoftTeams !== 'undefined') {
+					microsoftTeams.initialize(() => {
+						microsoftTeams.appInitialization.notifyAppLoaded();
+						microsoftTeams.appInitialization.notifySuccess();
+					});
+				} else {
+					setTimeout(() => {
+						if (typeof microsoftTeams !== 'undefined') {
+							microsoftTeams.initialize(() => {
+								microsoftTeams.appInitialization.notifyAppLoaded();
+								microsoftTeams.appInitialization.notifySuccess();
+							});
+						}
+					}, 1000);
+				}
+			}
+		</script>
 		<title>Open WebUI</title>
 
 		%sveltekit.head%
