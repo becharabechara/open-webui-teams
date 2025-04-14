@@ -1462,25 +1462,18 @@ applications.get_swagger_ui_html = swagger_ui_html
 ##########################################################################
 
 from fastapi import HTTPException, Request, Response, Body
-from starlette.responses import FileResponse
 from starlette.responses import RedirectResponse
 import requests
-import logging
 import uuid
-import secrets
-import os
+import time
 from open_webui.utils.oauth import OAuthManager, auth_manager_config
 from open_webui.models.users import Users
-from open_webui.utils.auth import get_password_hash
-
-log = logging.getLogger(__name__)
+from open_webui.utils.auth import decode_token
 
 @app.post("/api/teams/auth")
 async def teams_auth_api(request: Request, response: Response, data: dict = Body(...)):
-    log.debug("Received POST to /api/teams/auth")
     teams_token = data.get("token")
     if not teams_token:
-        log.warning("No Teams token provided")
         raise HTTPException(400, detail="No token provided")
 
     redirect_uri = f"{app.state.config.WEBUI_URL}/teams"
@@ -1508,12 +1501,10 @@ async def teams_auth_api(request: Request, response: Response, data: dict = Body
 
         sub = user_data.get("sub")
         if not sub:
-            log.warning(f"Teams SSO failed, sub is missing: {user_data}")
             raise HTTPException(400, detail="Invalid credentials")
         provider_sub = f"microsoft@{sub}"
         email = user_data.get(auth_manager_config.OAUTH_EMAIL_CLAIM, "").lower()
         if not email:
-            log.warning(f"Teams SSO failed, email is missing: {user_data}")
             raise HTTPException(400, detail="Invalid credentials")
 
         user = Users.get_user_by_oauth_sub(provider_sub)
@@ -1526,7 +1517,7 @@ async def teams_auth_api(request: Request, response: Response, data: dict = Body
 
         if not user:
             if not auth_manager_config.ENABLE_OAUTH_SIGNUP:
-                raise HTTPException(403, detail="Access prohibited")
+                raise HTTPException(403, detail="Account creation is disabled")
             picture_url = user_data.get(auth_manager_config.OAUTH_PICTURE_CLAIM, "/user.png")
             name = user_data.get(auth_manager_config.OAUTH_USERNAME_CLAIM, email.split("@")[0])
             user = Users.insert_new_user(
@@ -1537,12 +1528,10 @@ async def teams_auth_api(request: Request, response: Response, data: dict = Body
                 role=role,
                 oauth_sub=provider_sub,
             )
-            log.debug(f"Created new user: {email}")
         else:
             if user.role != role:
                 Users.update_user_role_by_id(user.id, role)
             Users.update_user_by_id(user.id, {"last_active_at": int(time.time())})
-            log.debug(f"Updated existing user: {email}")
 
         request.session["user"] = {
             "id": user.id,
@@ -1556,19 +1545,21 @@ async def teams_auth_api(request: Request, response: Response, data: dict = Body
         }
         Session.commit()
 
-        # Generate a JWT token for the frontend
         token = decode_token.sign(
             {"id": user.id, "email": user.email, "role": user.role},
             WEBUI_SECRET_KEY,
             app.state.config.JWT_EXPIRES_IN,
         )
-        log.debug("Teams SSO successful, returning user data")
-        return {"id": user.id, "email": user.email, "name": user.name, "role": user.role, "token": token}
-    except requests.exceptions.RequestException as e:
-        log.error(f"Teams token exchange failed: {str(e)}")
-        raise HTTPException(401, detail="Token exchange failed")
-    except Exception as e:
-        log.error(f"Unexpected error in teams_auth_api: {str(e)}", exc_info=True)
+        return {
+            "id": user.id,
+            "email": user.email,
+            "name": user.name,
+            "role": user.role,
+            "token": token
+        }
+    except requests.exceptions.RequestException:
+        raise HTTPException(401, detail="Authentication failed")
+    except Exception:
         raise HTTPException(500, detail="Internal server error")
     
 if os.path.exists(FRONTEND_BUILD_DIR):
