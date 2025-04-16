@@ -1470,17 +1470,17 @@ from open_webui.utils.oauth import OAuthManager, auth_manager_config
 from open_webui.models.users import Users
 from open_webui.utils.auth import decode_token
 
-@app.post("/api/teams/auth")
-async def teams_auth_api(request: Request, response: Response, data: dict = Body(...)):
-    teams_token = data.get("token")
-    if not teams_token:
+async def handle_teams_auth(request: Request, token: str, redirect_uri: str = None):
+    if not token:
         raise HTTPException(400, detail="No token provided")
+    
+    if not redirect_uri:
+        redirect_uri = f"{request.app.state.config.WEBUI_URL}/oauth/microsoft/callback"
 
-    redirect_uri = f"{app.state.config.WEBUI_URL}/teams"
     token_url = f"https://login.microsoftonline.com/{os.getenv('MICROSOFT_CLIENT_TENANT_ID')}/oauth2/v2.0/token"
     payload = {
         "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
-        "assertion": teams_token,
+        "assertion": token,
         "client_id": os.getenv("MICROSOFT_CLIENT_ID"),
         "client_secret": os.getenv("MICROSOFT_CLIENT_SECRET"),
         "scope": "openid profile email User.Read",
@@ -1548,7 +1548,7 @@ async def teams_auth_api(request: Request, response: Response, data: dict = Body
         token = decode_token.sign(
             {"id": user.id, "email": user.email, "role": user.role},
             WEBUI_SECRET_KEY,
-            app.state.config.JWT_EXPIRES_IN,
+            request.app.state.config.JWT_EXPIRES_IN,
         )
         return {
             "id": user.id,
@@ -1557,10 +1557,24 @@ async def teams_auth_api(request: Request, response: Response, data: dict = Body
             "role": user.role,
             "token": token
         }
-    except requests.exceptions.RequestException:
+    except requests.exceptions.RequestException as e:
+        log.error(f"DEBUG: Teams auth request failed: {str(e)}")
         raise HTTPException(401, detail="Authentication failed")
-    except Exception:
+    except Exception as e:
+        log.error(f"DEBUG: Teams auth internal error: {str(e)}")
         raise HTTPException(500, detail="Internal server error")
+
+@app.post("/api/teams/auth")
+async def teams_auth_api(request: Request, response: Response, data: dict = Body(...)):
+    token = data.get("token")
+    redirect_uri = data.get("redirect_uri")
+    return await handle_teams_auth(request, token, redirect_uri)
+
+@app.post("/api/teams/auth/exchange")
+async def teams_auth_exchange(request: Request, response: Response, data: dict = Body(...)):
+    token = data.get("token")
+    redirect_uri = data.get("redirect_uri")
+    return await handle_teams_auth(request, token, redirect_uri)
     
 if os.path.exists(FRONTEND_BUILD_DIR):
     mimetypes.add_type("text/javascript", ".js")
