@@ -1476,26 +1476,32 @@ applications.get_swagger_ui_html = swagger_ui_html
 # Microsoft Teams SSO Applicationn Integration
 ##########################################################################
 
-from open_webui.utils.misc import parse_duration
 from fastapi import HTTPException, Request, Response, Body
-from starlette.responses import RedirectResponse
+from starlette.responses import JSONResponse
 import requests
 import uuid
 import time
 from open_webui.utils.oauth import OAuthManager, auth_manager_config
 from open_webui.models.users import Users
 from open_webui.utils.auth import create_token
+from open_webui.utils.misc import parse_duration
 import logging
+import httpx
+from authlib.integrations.base_client import OAuthError
+import asyncio
+from fastapi import status
+
+log = logging.getLogger("open-webui")
 
 async def process_user_session(oauth_manager: OAuthManager, request: Request, user_data: dict):
     """Process user data, manage session, and generate a JWT token."""
     sub = user_data.get("sub")
     if not sub:
-        raise HTTPException(400, detail="Invalid credentials")
+        raise HTTPException(400, detail="Invalid credentials: Missing subject ID")
     provider_sub = f"microsoft@{sub}"
     email = user_data.get(auth_manager_config.OAUTH_EMAIL_CLAIM, "").lower()
     if not email:
-        raise HTTPException(400, detail="Invalid credentials")
+        raise HTTPException(400, detail="Invalid credentials: Missing email")
 
     user = Users.get_user_by_oauth_sub(provider_sub)
     if not user and auth_manager_config.OAUTH_MERGE_ACCOUNTS_BY_EMAIL:
@@ -1531,17 +1537,22 @@ async def process_user_session(oauth_manager: OAuthManager, request: Request, us
             default_permissions=request.app.state.config.USER_PERMISSIONS
         )
 
-    request.session["user"] = {
-        "id": user.id,
-        "email": user.email,
-        "name": user.name,
-        "role": user.role,
-        "profile_image_url": user.profile_image_url,
-        "last_active_at": user.last_active_at,
-        "updated_at": user.updated_at,
-        "created_at": user.created_at,
-    }
-    Session.commit()
+    # Set session data with validation
+    try:
+        request.session["user"] = {
+            "id": user.id,
+            "email": user.email,
+            "name": user.name,
+            "role": user.role,
+            "profile_image_url": user.profile_image_url,
+            "last_active_at": user.last_active_at,
+            "updated_at": user.updated_at,
+            "created_at": user.created_at,
+        }
+        Session.commit()
+    except Exception as e:
+        log.error(f"Failed to set session data: {str(e)}")
+        raise HTTPException(500, detail="Failed to persist session")
 
     token = create_token(
         data={"id": user.id},
@@ -1556,44 +1567,118 @@ async def process_user_session(oauth_manager: OAuthManager, request: Request, us
     }
 
 async def handle_teams_auth(request: Request, token: str, redirect_uri: str = None):
+    # Generate a unique request ID for tracing
+    request_id = str(uuid.uuid4())
+    log.info(f"[{request_id}] Processing Teams auth with token: {token[:10]}..., redirect_uri: {redirect_uri}")
+
     if not token:
+        log.error(f"[{request_id}] No token provided")
         raise HTTPException(400, detail="No token provided")
-    
-    log.debug(f"Processing Teams auth with token: {token[:10]}..., redirect_uri: {redirect_uri}")
 
     try:
         client = oauth_manager.get_client("microsoft")
         if not client:
+            log.error(f"[{request_id}] Microsoft OAuth provider not configured")
             raise HTTPException(400, detail="Microsoft OAuth provider not configured")
 
-        # Use fetch_access_token without explicit url or redirect_uri
-        token_data = await client.fetch_access_token(
-            grant_type="urn:ietf:params:oauth:grant-type:jwt-bearer",
-            assertion=token,
-            client_id=os.getenv("MICROSOFT_CLIENT_ID"),
-            client_secret=os.getenv("MICROSOFT_CLIENT_SECRET"),
-            scope="openid profile email User.Read",
-            requested_token_use="on_behalf_of"
-        )
+        # Attempt token exchange with retry on transient errors
+        max_retries = 1
+        for attempt in range(max_retries + 1):
+            try:
+                token_data = await client.fetch_access_token(
+                    grant_type="urn:ietf:params:oauth:grant-type:jwt-bearer",
+                    assertion=token,
+                    client_id=os.getenv("MICROSOFT_CLIENT_ID"),
+                    client_secret=os.getenv("MICROSOFT_CLIENT_SECRET"),
+                    scope="openid profile email User.Read",
+                    requested_token_use="on_behalf_of"
+                )
+                log.info(f"[{request_id}] Token exchange successful: access_token={token_data.get('access_token')[:10]}..., id_token={token_data.get('id_token')[:10]}...")
+                break
+            except (httpx.RequestError, httpx.HTTPStatusError) as e:
+                if attempt == max_retries:
+                    log.error(f"[{request_id}] Token exchange failed after {max_retries} retries: {str(e)}")
+                    raise HTTPException(503, detail=f"Token exchange failed: {str(e)}")
+                log.warning(f"[{request_id}] Retry {attempt + 1}/{max_retries} for token exchange: {str(e)}")
+                await asyncio.sleep(1)
 
-        log.debug(f"Token exchange successful: access_token={token_data.get('access_token')[:10]}..., id_token={token_data.get('id_token')[:10]}...")
+        # Validate token data
+        if not token_data.get("access_token") or not token_data.get("id_token"):
+            log.error(f"[{request_id}] Invalid token data: {token_data}")
+            raise HTTPException(400, detail="Invalid token response from provider")
 
-        request.session["access_token"] = token_data.get("access_token")
-        request.session["id_token"] = token_data.get("id_token")
+        # Set session tokens
+        try:
+            request.session["access_token"] = token_data.get("access_token")
+            request.session["id_token"] = token_data.get("id_token")
+        except Exception as e:
+            log.error(f"[{request_id}] Failed to set session tokens: {str(e)}")
+            raise HTTPException(500, detail="Failed to persist session tokens")
 
-        user_data = await client.userinfo(token=token_data)
+        # Fetch user info
+        try:
+            user_data = await client.userinfo(token=token_data)
+            if not isinstance(user_data, dict):
+                log.error(f"[{request_id}] Invalid userinfo response: {user_data}")
+                raise HTTPException(400, detail="Invalid userinfo response")
+        except OAuthError as e:
+            log.error(f"[{request_id}] OAuth error during userinfo: {str(e)}")
+            raise HTTPException(401, detail=f"Failed to fetch user info: {str(e)}")
+        except httpx.RequestError as e:
+            log.error(f"[{request_id}] Network error during userinfo: {str(e)}")
+            raise HTTPException(503, detail=f"Network error fetching user info: {str(e)}")
 
+        log.info(f"[{request_id}] User data retrieved: email={user_data.get('email', 'unknown')}")
         return await process_user_session(oauth_manager, request, user_data)
+
+    except HTTPException as e:
+        log.error(f"[{request_id}] HTTP exception: {str(e)}")
+        raise e
     except Exception as e:
-        log.error(f"DEBUG: Teams auth error: {str(e)}")
-        raise HTTPException(401, detail=f"Authentication failed: {str(e)}")
+        log.error(f"[{request_id}] Unexpected error: {str(e)}")
+        raise HTTPException(500, detail=f"Authentication failed: {str(e)}")
 
 @app.post("/api/teams/auth")
 async def teams_auth_api(request: Request, response: Response, data: dict = Body(...)):
+    request_id = str(uuid.uuid4())
+    log.info(f"[{request_id}] Received Teams auth request")
+
+    # Validate input
+    if not isinstance(data, dict):
+        log.error(f"[{request_id}] Invalid request body: not a dictionary")
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={"detail": "Invalid request body: must be a JSON object"}
+        )
+
     token = data.get("token")
     redirect_uri = data.get("redirect_uri")
-    result = await handle_teams_auth(request, token, redirect_uri)
-    return result
+
+    log.info(f"[{request_id}] Token: {token[:10]}..., redirect_uri: {redirect_uri}")
+
+    if not token:
+        log.error(f"[{request_id}] Missing token in request body")
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={"detail": "Missing token in request body"}
+        )
+
+    try:
+        result = await handle_teams_auth(request, token, redirect_uri)
+        log.info(f"[{request_id}] Teams auth successful for user: {result['email']}")
+        return result
+    except HTTPException as e:
+        log.error(f"[{request_id}] HTTP exception in teams_auth_api: {str(e)}")
+        return JSONResponse(
+            status_code=e.status_code,
+            content={"detail": e.detail}
+        )
+    except Exception as e:
+        log.error(f"[{request_id}] Unexpected error in teams_auth_api: {str(e)}")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"detail": f"Authentication failed: {str(e)}"}
+        )
     
 if os.path.exists(FRONTEND_BUILD_DIR):
     mimetypes.add_type("text/javascript", ".js")
