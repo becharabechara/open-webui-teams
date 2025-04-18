@@ -6,7 +6,7 @@
 
 	const i18n = getContext('i18n');
 	let loading = true;
-	let errorMessage = '';
+	let errorMessages = []; // Array to store errors with status, message, timestamp
 	let successMessage = '';
 	let teamsContext = false;
 	let teamsMobile = false;
@@ -43,7 +43,8 @@
 			setTimeout(() => {
 				const redirectUrl = '/';
 				if (typeof redirectUrl !== 'string') {
-					errorMessage = $i18n.t('Invalid redirect URL');
+					const error = $i18n.t('Invalid redirect URL');
+					errorMessages = [...errorMessages, { status: 'N/A', message: error, timestamp: new Date().toISOString() }];
 					return;
 				}
 				goto(redirectUrl);
@@ -59,14 +60,15 @@
 			} else if (Date.now() - startTime < timeout) {
 				setTimeout(checkSDK, 100);
 			} else {
-				errorMessage = $i18n.t('Failed to initialize Teams SDK');
+				const error = $i18n.t('Failed to initialize Teams SDK');
+				errorMessages = [...errorMessages, { status: 'N/A', message: error, timestamp: new Date().toISOString() }];
 				loading = false;
 			}
 		}
 		checkSDK();
 	};
 
-	const tryTeamsAuth = async (token) => {
+	const tryTeamsAuth = async (token, retryCount = 0, maxRetries = 3) => {
 		try {
 			const response = await fetch('/api/teams/auth', {
 				method: 'POST',
@@ -75,30 +77,47 @@
 			});
 			const contentType = response.headers.get('content-type') || 'unknown';
 			const status = response.status;
+
+			if (status === 502 && retryCount < maxRetries) {
+				// Retry on 502 Bad Gateway
+				const error = `HTTP 502: Retrying (${retryCount + 1}/${maxRetries})`;
+				errorMessages = [...errorMessages, { status, message: error, timestamp: new Date().toISOString() }];
+				await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1))); // Exponential backoff
+				return await tryTeamsAuth(token, retryCount + 1, maxRetries);
+			}
+
 			if (!response.ok) {
 				if (contentType.includes('application/json')) {
 					const errorData = await response.json();
-					throw new Error(`HTTP ${status}: ${errorData.detail || 'Unknown error'}`);
+					const error = `HTTP ${status}: ${errorData.detail || 'Unknown error'}`;
+					errorMessages = [...errorMessages, { status, message: error, timestamp: new Date().toISOString() }];
+					throw new Error(error);
 				} else {
 					const rawText = await response.text();
-					// Truncate raw response for display (first 200 chars)
 					const truncatedText = rawText.length > 200 ? rawText.substring(0, 200) + '...' : rawText;
 					const errorDetails = `HTTP ${status}, Content-Type: ${contentType}, Response: "${truncatedText}"`;
-					throw new Error(`Server returned invalid response: ${errorDetails}`);
+					errorMessages = [...errorMessages, { status, message: errorDetails, timestamp: new Date().toISOString() }];
+					throw new Error(errorDetails);
 				}
 			}
+
 			if (!contentType.includes('application/json')) {
 				const rawText = await response.text();
 				const truncatedText = rawText.length > 200 ? rawText.substring(0, 200) + '...' : rawText;
 				const errorDetails = `HTTP ${status}, Content-Type: ${contentType}, Response: "${truncatedText}"`;
+				errorMessages = [...errorMessages, { status, message: errorDetails, timestamp: new Date().toISOString() }];
 				throw new Error(`Expected JSON but received invalid response: ${errorDetails}`);
 			}
+
 			const sessionUser = await response.json();
-			await setSessionUser(sessionUser);
-			return true;
+			if (sessionUser && sessionUser.token) {
+				await setSessionUser(sessionUser);
+				return true;
+			}
+			const error = 'Invalid response: missing user data';
+			errorMessages = [...errorMessages, { status, message: error, timestamp: new Date().toISOString() }];
+			throw new Error(error);
 		} catch (error) {
-			// Include full error details in the UI
-			errorMessage = $i18n.t(`Authentication failed: ${error.message}`);
 			loading = false;
 			return false;
 		}
@@ -113,7 +132,8 @@
 			// Already authenticated, redirect to /
 			const redirectUrl = '/';
 			if (typeof redirectUrl !== 'string') {
-				errorMessage = $i18n.t('Invalid redirect URL');
+				const error = $i18n.t('Invalid redirect URL');
+				errorMessages = [...errorMessages, { status: 'N/A', message: error, timestamp: new Date().toISOString() }];
 				return;
 			}
 			goto(redirectUrl);
@@ -124,7 +144,8 @@
 			// Not in Teams context, redirect to /auth
 			const redirectUrl = '/auth';
 			if (typeof redirectUrl !== 'string') {
-				errorMessage = $i18n.t('Invalid redirect URL');
+				const error = $i18n.t('Invalid redirect URL');
+				errorMessages = [...errorMessages, { status: 'N/A', message: error, timestamp: new Date().toISOString() }];
 				return;
 			}
 			goto(redirectUrl);
@@ -141,12 +162,14 @@
 						await tryTeamsAuth(token);
 					},
 					failureCallback: (error) => {
-						errorMessage = $i18n.t(`Authentication failed: ${error}`);
+						const errMsg = $i18n.t(`Authentication failed: ${error}`);
+						errorMessages = [...errorMessages, { status: 'N/A', message: errMsg, timestamp: new Date().toISOString() }];
 						loading = false;
 					}
 				});
 			} catch (error) {
-				errorMessage = $i18n.t(`Teams SDK initialization error: ${error.message}`);
+				const errMsg = $i18n.t(`Teams SDK initialization error: ${error.message}`);
+				errorMessages = [...errorMessages, { status: 'N/A', message: errMsg, timestamp: new Date().toISOString() }];
 				loading = false;
 			}
 		});
@@ -161,10 +184,29 @@
 		</div>
 	{/if}
 
-	{#if errorMessage}
+	{#if errorMessages.length > 0}
 		<div class="w-full sm:max-w-md bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 p-4 rounded">
-			<h2 class="text-lg font-semibold mb-2">{$i18n.t('Error')}</h2>
-			<p class="text-sm break-all">{errorMessage}</p>
+			<h2 class="text-lg font-semibold mb-2">{$i18n.t('Errors')}</h2>
+			<div class="overflow-x-auto">
+				<table class="w-full text-sm text-left">
+					<thead class="text-xs uppercase bg-red-200 dark:bg-red-800">
+						<tr>
+							<th scope="col" class="px-2 py-1">{$i18n.t('Timestamp')}</th>
+							<th scope="col" class="px-2 py-1">{$i18n.t('Status')}</th>
+							<th scope="col" class="px-2 py-1">{$i18n.t('Message')}</th>
+						</tr>
+					</thead>
+					<tbody>
+						{#each errorMessages as error}
+							<tr class="border-b dark:border-red-700">
+								<td class="px-2 py-1">{new Date(error.timestamp).toLocaleString()}</td>
+								<td class="px-2 py-1">{error.status}</td>
+								<td class="px-2 py-1 break-all">{error.message}</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
 		</div>
 	{/if}
 
@@ -174,13 +216,29 @@
 </div>
 
 <style>
-	/* Ensure buttons and text scale appropriately */
+	/* Ensure table is responsive */
+	.overflow-x-auto {
+		overflow-x: auto;
+	}
+	/* Table styling */
+	table {
+		border-collapse: collapse;
+		width: 100%;
+	}
+	th, td {
+		text-align: left;
+	}
+	/* Responsive adjustments */
 	@media (max-width: 640px) {
 		.text-2xl {
 			font-size: 1.5rem;
 		}
 		.text-lg {
 			font-size: 1.125rem;
+		}
+		th, td {
+			font-size: 0.75rem;
+			padding: 0.5rem;
 		}
 	}
 	/* Allow long error messages to wrap */
