@@ -1559,27 +1559,24 @@ async def handle_teams_auth(request: Request, token: str, redirect_uri: str = No
     if not token:
         raise HTTPException(400, detail="No token provided")
     
-    if not redirect_uri:
-        redirect_uri = f"{request.app.state.config.WEBUI_URL}/oauth/microsoft/callback"
+    log.debug(f"Processing Teams auth with token: {token[:10]}..., redirect_uri: {redirect_uri}")
 
-    token_url = f"https://login.microsoftonline.com/{os.getenv('MICROSOFT_CLIENT_TENANT_ID')}/oauth2/v2.0/token"
-    
     try:
         client = oauth_manager.get_client("microsoft")
         if not client:
             raise HTTPException(400, detail="Microsoft OAuth provider not configured")
 
-        # Use fetch_access_token for On-Behalf-Of flow
+        # Use fetch_access_token without explicit url or redirect_uri
         token_data = await client.fetch_access_token(
-            url=token_url,
             grant_type="urn:ietf:params:oauth:grant-type:jwt-bearer",
             assertion=token,
             client_id=os.getenv("MICROSOFT_CLIENT_ID"),
             client_secret=os.getenv("MICROSOFT_CLIENT_SECRET"),
             scope="openid profile email User.Read",
-            requested_token_use="on_behalf_of",
-            redirect_uri=redirect_uri
+            requested_token_use="on_behalf_of"
         )
+
+        log.debug(f"Token exchange successful: access_token={token_data.get('access_token')[:10]}..., id_token={token_data.get('id_token')[:10]}...")
 
         request.session["access_token"] = token_data.get("access_token")
         request.session["id_token"] = token_data.get("id_token")
@@ -1595,7 +1592,6 @@ async def handle_teams_auth(request: Request, token: str, redirect_uri: str = No
 async def teams_auth_api(request: Request, response: Response, data: dict = Body(...)):
     token = data.get("token")
     redirect_uri = data.get("redirect_uri")
-    log.debug(f"Processing Teams auth with token: {token[:10]}..., redirect_uri: {redirect_uri}")
     result = await handle_teams_auth(request, token, redirect_uri)
     return result
     
