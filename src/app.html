@@ -101,27 +101,45 @@
 			})();
 		</script>
 		<!-- Add Microsoft Teams SDK -->
-		<script src="https://res.cdn.office.net/teams-js/2.36.0/js/MicrosoftTeams.min.js" defer ></script>
+		<script src="https://res.cdn.office.net/teams-js/2.36.0/js/MicrosoftTeams.min.js"></script>
 		<script>
-			if (
-				window.parent !== window ||
-				window.location.hostname.includes('teams.microsoft.com')
-			) {
-				if (typeof microsoftTeams !== 'undefined') {
-					microsoftTeams.initialize(() => {
-						microsoftTeams.appInitialization.notifyAppLoaded();
-						microsoftTeams.appInitialization.notifySuccess();
-					});
-				} else {
-					setTimeout(() => {
-						if (typeof microsoftTeams !== 'undefined') {
-							microsoftTeams.initialize(() => {
-								microsoftTeams.appInitialization.notifyAppLoaded();
-								microsoftTeams.appInitialization.notifySuccess();
-							});
-						}
-					}, 1000);
+			// Reuse the same Teams detection logic as in src/routes/teams/+page.svelte
+			function isTeamsContext() {
+				const userAgent = navigator.userAgent.toLowerCase();
+				const isTeams = userAgent.includes("teams");
+				const isEmbedded = 
+					(window.parent === window.self && window.nativeInterface) ||
+					window.name === "embedded-page-container" ||
+					window.name === "extension-tab-frame";
+				return isTeams || isEmbedded;
+			}
+
+			// Wait for the Teams SDK to load
+			function waitForTeamsSDK(callback, timeout = 5000) {
+				const startTime = Date.now();
+				function checkSDK() {
+					if (typeof window.microsoftTeams !== 'undefined') {
+						callback();
+					} else if (Date.now() - startTime < timeout) {
+						setTimeout(checkSDK, 100);
+					} else {
+						// If SDK fails to load within timeout, proceed without initialization
+						console.log('Teams SDK failed to load within timeout');
+					}
 				}
+				checkSDK();
+			}
+
+			// Initialize Teams SDK if in Teams context
+			if (isTeamsContext()) {
+				waitForTeamsSDK(() => {
+					if (typeof window.microsoftTeams !== 'undefined') {
+						window.microsoftTeams.initialize(() => {
+							window.microsoftTeams.appInitialization.notifyAppLoaded();
+							window.microsoftTeams.appInitialization.notifySuccess();
+						});
+					}
+				});
 			}
 		</script>
 		<title>Open WebUI</title>

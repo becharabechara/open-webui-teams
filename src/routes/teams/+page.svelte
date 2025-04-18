@@ -1,28 +1,57 @@
 <script>
-	import { onMount, tick } from 'svelte';
+	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { toast } from 'svelte-sonner';
 	import { getContext } from 'svelte';
-	import { getSessionUser } from '$lib/apis/auths';
 	import { user } from '$lib/stores';
 
 	const i18n = getContext('i18n');
 	let loading = true;
-	let showPopup = false;
-	let accounts = [];
+	let errorMessage = '';
+	let successMessage = '';
+	let teamsContext = false;
+	let teamsMobile = false;
+
+	// Detect if the user is in a Teams context
+	const isTeamsContext = () => {
+		const userAgent = navigator.userAgent.toLowerCase();
+		const isTeams = userAgent.includes("teams");
+		const isEmbedded = 
+			(window.parent === window.self && window.nativeInterface) ||
+			window.name === "embedded-page-container" ||
+			window.name === "extension-tab-frame";
+		return isTeams || isEmbedded;
+	};
+
+	// Detect if the user is on Teams mobile
+	const isTeamsMobile = () => {
+		const userAgent = navigator.userAgent.toLowerCase();
+		const isTeams = userAgent.includes("teams");
+		const isMobile = /mobile|android|iphone|ipad|ipod/.test(userAgent);
+		const isTeamsMobileApp = userAgent.includes("com.microsoft.skype.teams") || userAgent.includes("teamsmobile");
+		return isTeams && isMobile && isTeamsMobileApp;
+	};
 
 	const setSessionUser = async (sessionUser) => {
 		if (sessionUser) {
 			if (sessionUser.token) localStorage.token = sessionUser.token;
 			await user.set(sessionUser);
-			if (typeof window.microsoftTeams !== 'undefined') {
+			if (teamsContext && typeof window.microsoftTeams !== 'undefined') {
 				window.microsoftTeams.appInitialization.notifySuccess();
 			}
-			goto('/');
+			// Show success banner and redirect to /
+			successMessage = $i18n.t('Connection successful!');
+			setTimeout(() => {
+				const redirectUrl = '/';
+				if (typeof redirectUrl !== 'string') {
+					errorMessage = $i18n.t('Invalid redirect URL');
+					return;
+				}
+				goto(redirectUrl);
+			}, 2000); // Redirect after 2 seconds
 		}
 	};
 
-	const waitForTeamsSDK = (callback, timeout = 5000) => {
+	const waitForTeamsSDK = (callback, timeout = 10000) => {
 		const startTime = Date.now();
 		function checkSDK() {
 			if (typeof window.microsoftTeams !== 'undefined') {
@@ -30,48 +59,16 @@
 			} else if (Date.now() - startTime < timeout) {
 				setTimeout(checkSDK, 100);
 			} else {
-				console.log('DEBUG: Teams SDK failed to load');
-				fetchOAuthUrl();
+				errorMessage = $i18n.t('Failed to initialize Teams SDK');
+				loading = false;
 			}
 		}
 		checkSDK();
 	};
 
-	const fetchOAuthUrl = async () => {
-		loading = true;
-		try {
-			const redirectUri = window.location.origin + '/oauth/microsoft/callback';
-			const response = await fetch(`/api/oauth/microsoft/login-url?redirect_uri=${encodeURIComponent(redirectUri)}`, {
-				method: 'GET',
-				headers: { 'Content-Type': 'application/json' }
-			});
-			if (!response.ok) throw new Error('Failed to get OAuth URL');
-			const data = await response.json();
-			accounts = [{
-				id: 'manual',
-				displayName: $i18n.t('Sign in with Microsoft'),
-				email: $i18n.t('Select to authenticate'),
-				oauthUrl: data.url
-			}];
-			await fetch('/api/set-redirect', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ redirect: window.location.origin + '/' })
-			});
-			console.log('DEBUG: OAuth URL fetched:', data.url);
-			await tick(); // Ensure UI updates
-			showPopup = true;
-		} catch (error) {
-			console.error('DEBUG: OAuth URL fetch error:', error);
-			toast.error($i18n.t('Failed to load sign-in URL'));
-			loading = false;
-			showPopup = false;
-		}
-	};
-
 	const tryTeamsAuth = async (token) => {
 		try {
-			const redirectUri = window.location.origin + '/oauth/microsoft/callback';
+			const redirectUri = `${window.location.origin}/oauth/microsoft/callback`;
 			const response = await fetch('/api/teams/auth', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
@@ -79,81 +76,42 @@
 			});
 			if (!response.ok) {
 				const errorData = await response.json();
-				if (errorData.detail.includes('AADSTS50020')) {
-					console.log('DEBUG: Multiple accounts detected');
-					fetchOAuthUrl();
-					return false;
-				}
-				throw new Error('Authentication failed');
+				throw new Error(errorData.detail);
 			}
 			const sessionUser = await response.json();
 			await setSessionUser(sessionUser);
 			return true;
 		} catch (error) {
-			console.error('DEBUG: Teams auth error:', error);
-			fetchOAuthUrl();
+			errorMessage = $i18n.t(`Authentication failed: ${error.message}`);
+			loading = false;
 			return false;
 		}
 	};
 
-	const selectAccount = async (account) => {
-		if (!account) return;
-		loading = true;
-		showPopup = false;
-		console.log('DEBUG: Selecting account:', account.id);
-		if (account.id === 'manual') {
-			try {
-				if (typeof window.microsoftTeams !== 'undefined') {
-					console.log('DEBUG: Attempting Teams authentication dialog');
-					window.microsoftTeams.initialize();
-					window.microsoftTeams.authentication.authenticate({
-						url: account.oauthUrl,
-						width: 600,
-						height: 600,
-						isExternal: true, // Force external popup
-						successCallback: () => {
-							console.log('DEBUG: Authentication dialog succeeded');
-							goto('/');
-						},
-						failureCallback: (error) => {
-							console.error('DEBUG: Authentication dialog failed:', error);
-							// Fallback to top-level navigation
-							console.log('DEBUG: Falling back to top-level navigation');
-							window.top.location.href = account.oauthUrl;
-						}
-					});
-				} else {
-					console.log('DEBUG: No Teams SDK, using top-level navigation');
-					window.top.location.href = account.oauthUrl;
-				}
-			} catch (error) {
-				console.error('DEBUG: Manual auth error:', error);
-				toast.error($i18n.t('Authentication failed'));
-				loading = false;
-				fetchOAuthUrl();
-			}
-			return;
-		}
-		const success = await tryTeamsAuth(account.token);
-		if (success) {
-			loading = false;
-		}
-	};
-
 	onMount(async () => {
-		console.log('DEBUG: Teams context:', window.parent !== window, window.location.hostname);
+		// Detect Teams context and mobile
+		teamsContext = isTeamsContext();
+		teamsMobile = isTeamsMobile();
+
 		if ($user) {
-			goto('/');
+			// Already authenticated, redirect to /
+			const redirectUrl = '/';
+			if (typeof redirectUrl !== 'string') {
+				errorMessage = $i18n.t('Invalid redirect URL');
+				return;
+			}
+			goto(redirectUrl);
 			return;
 		}
 
-		const isTeamsContext =(window.parent === window.self && window.nativeInterface) 
-			|| window.navigator.userAgent.includes("Teams") 
-			|| window.name === "embedded-page-container" 
-			|| window.name === "extension-tab-frame";
-
-		if (!isTeamsContext) {
-			fetchOAuthUrl();
+		if (!teamsContext) {
+			// Not in Teams context, redirect to /auth
+			const redirectUrl = '/auth';
+			if (typeof redirectUrl !== 'string') {
+				errorMessage = $i18n.t('Invalid redirect URL');
+				return;
+			}
+			goto(redirectUrl);
 			return;
 		}
 
@@ -164,97 +122,49 @@
 
 				window.microsoftTeams.authentication.getAuthToken({
 					successCallback: async (token) => {
-						accounts = [{
-							id: 'teams',
-							displayName: $i18n.t('Teams Account'),
-							email: $i18n.t('Use Teams authentication'),
-							token
-						}];
-						const success = await tryTeamsAuth(token);
-						if (!success) {
-							await tick();
-							showPopup = true;
-						}
-						loading = false;
+						await tryTeamsAuth(token);
 					},
 					failureCallback: (error) => {
-						console.error('DEBUG: getAuthToken failed:', error);
-						fetchOAuthUrl();
+						errorMessage = $i18n.t(`Authentication failed: ${error}`);
+						loading = false;
 					}
 				});
 			} catch (error) {
-				console.error('DEBUG: Teams SDK initialization error:', error);
-				fetchOAuthUrl();
+				errorMessage = $i18n.t(`Teams SDK initialization error: ${error.message}`);
+				loading = false;
 			}
 		});
 	});
 </script>
 
-<div class="w-full h-screen flex flex-col items-center justify-center p-4">
-	<h1 class="text-2xl font-bold mb-4">{$i18n.t('Sign in to Teams')}</h1>
-	<p class="text-gray-600 dark:text-gray-300 mb-6 text-center">
-		{$i18n.t('Please choose an account to continue.')}
-	</p>
-	{#if loading}
-		<div class="text-gray-600 dark:text-gray-300">{$i18n.t('Authenticating...')}</div>
-	{:else}
-		<button
-			on:click={() => (showPopup = true)}
-			class="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700 disabled:bg-blue-400"
-			disabled={loading || accounts.length === 0}
-		>
-			{$i18n.t('Select Account')}
-		</button>
+<div class="w-full h-screen flex flex-col items-center justify-center p-4 space-y-4">
+	{#if successMessage}
+		<div class="w-full sm:max-w-md bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 p-4 rounded">
+			<h2 class="text-lg font-semibold mb-2">{$i18n.t('Success')}</h2>
+			<p class="text-sm">{successMessage}</p>
+		</div>
 	{/if}
 
-	{#if showPopup}
-		<div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-			<div class="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-md">
-				<h2 class="text-xl font-semibold mb-4">{$i18n.t('Choose an Account')}</h2>
-				{#if accounts.length > 0}
-					<ul class="space-y-2">
-						{#each accounts as account}
-							<li>
-								<button
-									on:click={() => selectAccount(account)}
-									class="w-full text-left px-4 py-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700"
-									disabled={loading}
-								>
-									<span class="font-medium">{account.displayName}</span>
-									<br />
-									<span class="text-sm text-gray-500">{account.email}</span>
-								</button>
-							</li>
-						{/each}
-					</ul>
-				{:else}
-					<p class="text-gray-600 dark:text-gray-300">{$i18n.t('No accounts available.')}</p>
-				{/if}
-				<div class="mt-4 flex justify-end">
-					<button
-						on:click={() => (showPopup = false)}
-						class="px-4 py-2 text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-white"
-						disabled={loading}
-					>
-						{$i18n.t('Cancel')}
-					</button>
-				</div>
-			</div>
+	{#if errorMessage}
+		<div class="w-full sm:max-w-md bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 p-4 rounded">
+			<h2 class="text-lg font-semibold mb-2">{$i18n.t('Error')}</h2>
+			<p class="text-sm">{errorMessage}</p>
 		</div>
+	{/if}
+
+	{#if loading}
+		<div class="text-gray-600 dark:text-gray-300 text-sm">{$i18n.t('Authenticating...')}</div>
 	{/if}
 </div>
 
 <style>
-	button {
-		transition: background-color 0.2s;
-	}
-	.fixed {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-	}
-	.bg-white {
-		max-height: 80vh;
-		overflow-y: auto;
+	/* Ensure buttons and text scale appropriately */
+	@media (max-width: 640px) {
+		.text-2xl {
+			font-size: 1.5rem;
+		}
+		.text-lg {
+			font-size: 1.125rem;
+		}
 	}
 </style>
