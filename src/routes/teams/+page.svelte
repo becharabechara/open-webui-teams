@@ -68,20 +68,36 @@
 
 	const tryTeamsAuth = async (token) => {
 		try {
-			const redirectUri = `${window.location.origin}/oauth/microsoft/callback`;
 			const response = await fetch('/api/teams/auth', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ token, redirect_uri: redirectUri })
+				body: JSON.stringify({ token })
 			});
+			const contentType = response.headers.get('content-type') || 'unknown';
+			const status = response.status;
 			if (!response.ok) {
-				const errorData = await response.json();
-				throw new Error(errorData.detail);
+				if (contentType.includes('application/json')) {
+					const errorData = await response.json();
+					throw new Error(`HTTP ${status}: ${errorData.detail || 'Unknown error'}`);
+				} else {
+					const rawText = await response.text();
+					// Truncate raw response for display (first 200 chars)
+					const truncatedText = rawText.length > 200 ? rawText.substring(0, 200) + '...' : rawText;
+					const errorDetails = `HTTP ${status}, Content-Type: ${contentType}, Response: "${truncatedText}"`;
+					throw new Error(`Server returned invalid response: ${errorDetails}`);
+				}
+			}
+			if (!contentType.includes('application/json')) {
+				const rawText = await response.text();
+				const truncatedText = rawText.length > 200 ? rawText.substring(0, 200) + '...' : rawText;
+				const errorDetails = `HTTP ${status}, Content-Type: ${contentType}, Response: "${truncatedText}"`;
+				throw new Error(`Expected JSON but received invalid response: ${errorDetails}`);
 			}
 			const sessionUser = await response.json();
 			await setSessionUser(sessionUser);
 			return true;
 		} catch (error) {
+			// Include full error details in the UI
 			errorMessage = $i18n.t(`Authentication failed: ${error.message}`);
 			loading = false;
 			return false;
@@ -148,7 +164,7 @@
 	{#if errorMessage}
 		<div class="w-full sm:max-w-md bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 p-4 rounded">
 			<h2 class="text-lg font-semibold mb-2">{$i18n.t('Error')}</h2>
-			<p class="text-sm">{errorMessage}</p>
+			<p class="text-sm break-all">{errorMessage}</p>
 		</div>
 	{/if}
 
@@ -166,5 +182,9 @@
 		.text-lg {
 			font-size: 1.125rem;
 		}
+	}
+	/* Allow long error messages to wrap */
+	.break-all {
+		word-break: break-all;
 	}
 </style>
