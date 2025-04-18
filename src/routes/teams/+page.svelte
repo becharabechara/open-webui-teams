@@ -6,7 +6,7 @@
 
 	const i18n = getContext('i18n');
 	let loading = true;
-	let errorMessages = []; // Array to store errors with status, message, timestamp
+	let errorMessages = [];
 	let successMessage = '';
 	let teamsContext = false;
 	let teamsMobile = false;
@@ -48,7 +48,7 @@
 					return;
 				}
 				goto(redirectUrl);
-			}, 2000); // Redirect after 2 seconds
+			}, 2000);
 		}
 	};
 
@@ -72,41 +72,41 @@
 		try {
 			const response = await fetch('/api/teams/auth', {
 				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
+				headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
 				body: JSON.stringify({ token })
 			});
 			const contentType = response.headers.get('content-type') || 'unknown';
 			const status = response.status;
 
+			// Retry on 502
 			if (status === 502 && retryCount < maxRetries) {
-				// Retry on 502 Bad Gateway
-				const error = `HTTP 502: Retrying (${retryCount + 1}/${maxRetries})`;
+				const error = $i18n.t(`HTTP 502: Retrying (${retryCount + 1}/${maxRetries})`);
 				errorMessages = [...errorMessages, { status, message: error, timestamp: new Date().toISOString() }];
-				await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1))); // Exponential backoff
+				await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1)));
 				return await tryTeamsAuth(token, retryCount + 1, maxRetries);
 			}
 
+			// Handle errors
 			if (!response.ok) {
 				if (contentType.includes('application/json')) {
 					const errorData = await response.json();
-					const error = `HTTP ${status}: ${errorData.detail || 'Unknown error'}`;
+					const error = $i18n.t(`HTTP ${status}: ${errorData.detail || 'Unknown error'}`);
 					errorMessages = [...errorMessages, { status, message: error, timestamp: new Date().toISOString() }];
 					throw new Error(error);
 				} else {
 					const rawText = await response.text();
-					const truncatedText = rawText.length > 200 ? rawText.substring(0, 200) + '...' : rawText;
-					const errorDetails = `HTTP ${status}, Content-Type: ${contentType}, Response: "${truncatedText}"`;
+					const errorDetails = $i18n.t(`HTTP ${status}, Content-Type: ${contentType}, Response: "${rawText}"`);
 					errorMessages = [...errorMessages, { status, message: errorDetails, timestamp: new Date().toISOString() }];
 					throw new Error(errorDetails);
 				}
 			}
 
+			// Handle JSON response
 			if (!contentType.includes('application/json')) {
 				const rawText = await response.text();
-				const truncatedText = rawText.length > 200 ? rawText.substring(0, 200) + '...' : rawText;
-				const errorDetails = `HTTP ${status}, Content-Type: ${contentType}, Response: "${truncatedText}"`;
+				const errorDetails = $i18n.t(`HTTP ${status}, Content-Type: ${contentType}, Response: "${rawText}"`);
 				errorMessages = [...errorMessages, { status, message: errorDetails, timestamp: new Date().toISOString() }];
-				throw new Error(`Expected JSON but received invalid response: ${errorDetails}`);
+				throw new Error($i18n.t(`Expected JSON but received invalid response: ${errorDetails}`));
 			}
 
 			const sessionUser = await response.json();
@@ -114,7 +114,7 @@
 				await setSessionUser(sessionUser);
 				return true;
 			}
-			const error = 'Invalid response: missing user data';
+			const error = $i18n.t('Invalid response: missing user data');
 			errorMessages = [...errorMessages, { status, message: error, timestamp: new Date().toISOString() }];
 			throw new Error(error);
 		} catch (error) {
@@ -178,30 +178,30 @@
 
 <div class="w-full h-screen flex flex-col items-center justify-center p-4 space-y-4">
 	{#if successMessage}
-		<div class="w-full sm:max-w-md bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 p-4 rounded">
+		<div class="w-full bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 p-4 rounded">
 			<h2 class="text-lg font-semibold mb-2">{$i18n.t('Success')}</h2>
-			<p class="text-sm">{successMessage}</p>
+			<p class="text-sm">{$i18n.t(successMessage)}</p>
 		</div>
 	{/if}
 
 	{#if errorMessages.length > 0}
-		<div class="w-full sm:max-w-md bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 p-4 rounded">
+		<div class="w-full bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 p-4 rounded">
 			<h2 class="text-lg font-semibold mb-2">{$i18n.t('Errors')}</h2>
 			<div class="overflow-x-auto">
-				<table class="w-full text-sm text-left">
+				<table class="min-w-full text-sm text-left">
 					<thead class="text-xs uppercase bg-red-200 dark:bg-red-800">
 						<tr>
-							<th scope="col" class="px-2 py-1">{$i18n.t('Timestamp')}</th>
-							<th scope="col" class="px-2 py-1">{$i18n.t('Status')}</th>
-							<th scope="col" class="px-2 py-1">{$i18n.t('Message')}</th>
+							<th scope="col" class="px-4 py-2 whitespace-nowrap">{$i18n.t('Timestamp')}</th>
+							<th scope="col" class="px-4 py-2 whitespace-nowrap">{$i18n.t('Status')}</th>
+							<th scope="col" class="px-4 py-2">{$i18n.t('Message')}</th>
 						</tr>
 					</thead>
 					<tbody>
 						{#each errorMessages as error}
 							<tr class="border-b dark:border-red-700">
-								<td class="px-2 py-1">{new Date(error.timestamp).toLocaleString()}</td>
-								<td class="px-2 py-1">{error.status}</td>
-								<td class="px-2 py-1 break-all">{error.message}</td>
+								<td class="px-4 py-2 whitespace-nowrap">{new Date(error.timestamp).toLocaleString()}</td>
+								<td class="px-4 py-2 whitespace-nowrap">{error.status}</td>
+								<td class="px-4 py-2 break-words">{error.message}</td>
 							</tr>
 						{/each}
 					</tbody>
@@ -217,16 +217,22 @@
 
 <style>
 	/* Ensure table is responsive */
+	.min-w-full {
+		width: 100%;
+	}
 	.overflow-x-auto {
 		overflow-x: auto;
 	}
 	/* Table styling */
 	table {
 		border-collapse: collapse;
-		width: 100%;
 	}
 	th, td {
 		text-align: left;
+	}
+	/* Flexible message column */
+	.break-words {
+		word-break: break-word;
 	}
 	/* Responsive adjustments */
 	@media (max-width: 640px) {
@@ -240,9 +246,5 @@
 			font-size: 0.75rem;
 			padding: 0.5rem;
 		}
-	}
-	/* Allow long error messages to wrap */
-	.break-all {
-		word-break: break-all;
 	}
 </style>

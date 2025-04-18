@@ -1562,7 +1562,7 @@ async def process_user_session(oauth_manager: OAuthManager, request: Request, us
         "id": user.id,
         "email": user.email,
         "name": user.name,
-        "role": user.role,
+        "role": role,
         "token": token
     }
 
@@ -1649,7 +1649,7 @@ async def teams_auth_api(request: Request, response: Response, data: dict = Body
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
             content={"detail": "Invalid request body: must be a JSON object"},
-            headers={"Content-Type": "application/json", "Connection": "keep-alive"}
+            headers={"Content-Type": "application/json", "Connection": "keep-alive", "Accept": "application/json"}
         )
 
     token = data.get("token")
@@ -1662,7 +1662,7 @@ async def teams_auth_api(request: Request, response: Response, data: dict = Body
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
             content={"detail": "Missing token in request body"},
-            headers={"Content-Type": "application/json", "Connection": "keep-alive"}
+            headers={"Content-Type": "application/json", "Connection": "keep-alive", "Accept": "application/json"}
         )
 
     try:
@@ -1671,21 +1671,21 @@ async def teams_auth_api(request: Request, response: Response, data: dict = Body
         return JSONResponse(
             content=result,
             status_code=status.HTTP_200_OK,
-            headers={"Content-Type": "application/json", "Connection": "keep-alive"}
+            headers={"Content-Type": "application/json", "Connection": "keep-alive", "Accept": "application/json"}
         )
     except HTTPException as e:
         log.error(f"[{request_id}] HTTP exception in teams_auth_api: {str(e)}")
         return JSONResponse(
             status_code=e.status_code,
             content={"detail": e.detail},
-            headers={"Content-Type": "application/json", "Connection": "keep-alive"}
+            headers={"Content-Type": "application/json", "Connection": "keep-alive", "Accept": "application/json"}
         )
     except Exception as e:
         log.error(f"[{request_id}] Unexpected error in teams_auth_api: {str(e)}")
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={"detail": f"Authentication failed: {str(e)}"},
-            headers={"Content-Type": "application/json", "Connection": "keep-alive"}
+            headers={"Content-Type": "application/json", "Connection": "keep-alive", "Accept": "application/json"}
         )
     
 if os.path.exists(FRONTEND_BUILD_DIR):
