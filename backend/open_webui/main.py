@@ -859,8 +859,23 @@ class RedirectMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
         return response
 
+class TeamsRedirectMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        # Check if the request is a GET request to the root path
+        if request.method == "GET" and request.url.path == "/":
+            # Check for Teams in the User-Agent
+            user_agent = request.headers.get("User-Agent", "").lower()
+            is_teams = "teams" in user_agent
+            # Redirect to /teams if in Teams context
+            if is_teams:
+                return RedirectResponse(url="/teams")
+        
+        # Proceed with the normal flow for other requests
+        response = await call_next(request)
+        return response
 
-# Add the middleware to the app
+# Add the middlewares to the app
+app.add_middleware(TeamsRedirectMiddleware)
 app.add_middleware(RedirectMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 
@@ -1461,6 +1476,7 @@ applications.get_swagger_ui_html = swagger_ui_html
 # Microsoft Teams SSO Applicationn Integration
 ##########################################################################
 
+from open_webui.utils.misc import parse_duration
 from fastapi import HTTPException, Request, Response, Body
 from starlette.responses import RedirectResponse
 import requests
@@ -1468,7 +1484,76 @@ import uuid
 import time
 from open_webui.utils.oauth import OAuthManager, auth_manager_config
 from open_webui.models.users import Users
-from open_webui.utils.auth import decode_token
+from open_webui.utils.auth import create_token
+import logging
+
+async def process_user_session(oauth_manager: OAuthManager, request: Request, user_data: dict):
+    """Process user data, manage session, and generate a JWT token."""
+    sub = user_data.get("sub")
+    if not sub:
+        raise HTTPException(400, detail="Invalid credentials")
+    provider_sub = f"microsoft@{sub}"
+    email = user_data.get(auth_manager_config.OAUTH_EMAIL_CLAIM, "").lower()
+    if not email:
+        raise HTTPException(400, detail="Invalid credentials")
+
+    user = Users.get_user_by_oauth_sub(provider_sub)
+    if not user and auth_manager_config.OAUTH_MERGE_ACCOUNTS_BY_EMAIL:
+        user = Users.get_user_by_email(email)
+        if user:
+            Users.update_user_oauth_sub_by_id(user.id, provider_sub)
+
+    role = oauth_manager.get_user_role(user, user_data)
+
+    if not user:
+        if not auth_manager_config.ENABLE_OAUTH_SIGNUP:
+            raise HTTPException(403, detail="Account creation is disabled")
+        picture_url = user_data.get(auth_manager_config.OAUTH_PICTURE_CLAIM, "/user.png")
+        name = user_data.get(auth_manager_config.OAUTH_USERNAME_CLAIM, email.split("@")[0])
+        user = Users.insert_new_user(
+            id=str(uuid.uuid4()),
+            email=email,
+            name=name,
+            profile_image_url=picture_url,
+            role=role,
+            oauth_sub=provider_sub,
+        )
+    else:
+        if user.role != role:
+            Users.update_user_role_by_id(user.id, role)
+        Users.update_user_by_id(user.id, {"last_active_at": int(time.time())})
+
+    # Update user groups if enabled
+    if auth_manager_config.ENABLE_OAUTH_GROUP_MANAGEMENT and role != "admin":
+        oauth_manager.update_user_groups(
+            user=user,
+            user_data=user_data,
+            default_permissions=request.app.state.config.USER_PERMISSIONS
+        )
+
+    request.session["user"] = {
+        "id": user.id,
+        "email": user.email,
+        "name": user.name,
+        "role": user.role,
+        "profile_image_url": user.profile_image_url,
+        "last_active_at": user.last_active_at,
+        "updated_at": user.updated_at,
+        "created_at": user.created_at,
+    }
+    Session.commit()
+
+    token = create_token(
+        data={"id": user.id},
+        expires_delta=parse_duration(auth_manager_config.JWT_EXPIRES_IN)
+    )
+    return {
+        "id": user.id,
+        "email": user.email,
+        "name": user.name,
+        "role": user.role,
+        "token": token
+    }
 
 async def handle_teams_auth(request: Request, token: str, redirect_uri: str = None):
     if not token:
@@ -1478,103 +1563,41 @@ async def handle_teams_auth(request: Request, token: str, redirect_uri: str = No
         redirect_uri = f"{request.app.state.config.WEBUI_URL}/oauth/microsoft/callback"
 
     token_url = f"https://login.microsoftonline.com/{os.getenv('MICROSOFT_CLIENT_TENANT_ID')}/oauth2/v2.0/token"
-    payload = {
-        "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
-        "assertion": token,
-        "client_id": os.getenv("MICROSOFT_CLIENT_ID"),
-        "client_secret": os.getenv("MICROSOFT_CLIENT_SECRET"),
-        "scope": "openid profile email User.Read",
-        "requested_token_use": "on_behalf_of",
-        "redirect_uri": redirect_uri,
-    }
-
+    
     try:
-        token_response = requests.post(token_url, data=payload)
-        token_response.raise_for_status()
-        token_data = token_response.json()
+        client = oauth_manager.get_client("microsoft")
+        if not client:
+            raise HTTPException(400, detail="Microsoft OAuth provider not configured")
+
+        # Use fetch_access_token for On-Behalf-Of flow
+        token_data = await client.fetch_access_token(
+            url=token_url,
+            grant_type="urn:ietf:params:oauth:grant-type:jwt-bearer",
+            assertion=token,
+            client_id=os.getenv("MICROSOFT_CLIENT_ID"),
+            client_secret=os.getenv("MICROSOFT_CLIENT_SECRET"),
+            scope="openid profile email User.Read",
+            requested_token_use="on_behalf_of",
+            redirect_uri=redirect_uri
+        )
 
         request.session["access_token"] = token_data.get("access_token")
         request.session["id_token"] = token_data.get("id_token")
 
-        client = oauth_manager.get_client("microsoft")
         user_data = await client.userinfo(token=token_data)
 
-        sub = user_data.get("sub")
-        if not sub:
-            raise HTTPException(400, detail="Invalid credentials")
-        provider_sub = f"microsoft@{sub}"
-        email = user_data.get(auth_manager_config.OAUTH_EMAIL_CLAIM, "").lower()
-        if not email:
-            raise HTTPException(400, detail="Invalid credentials")
-
-        user = Users.get_user_by_oauth_sub(provider_sub)
-        if not user and auth_manager_config.OAUTH_MERGE_ACCOUNTS_BY_EMAIL:
-            user = Users.get_user_by_email(email)
-            if user:
-                Users.update_user_oauth_sub_by_id(user.id, provider_sub)
-
-        role = oauth_manager.get_user_role(user, user_data)
-
-        if not user:
-            if not auth_manager_config.ENABLE_OAUTH_SIGNUP:
-                raise HTTPException(403, detail="Account creation is disabled")
-            picture_url = user_data.get(auth_manager_config.OAUTH_PICTURE_CLAIM, "/user.png")
-            name = user_data.get(auth_manager_config.OAUTH_USERNAME_CLAIM, email.split("@")[0])
-            user = Users.insert_new_user(
-                id=str(uuid.uuid4()),
-                email=email,
-                name=name,
-                profile_image_url=picture_url,
-                role=role,
-                oauth_sub=provider_sub,
-            )
-        else:
-            if user.role != role:
-                Users.update_user_role_by_id(user.id, role)
-            Users.update_user_by_id(user.id, {"last_active_at": int(time.time())})
-
-        request.session["user"] = {
-            "id": user.id,
-            "email": user.email,
-            "name": user.name,
-            "role": user.role,
-            "profile_image_url": user.profile_image_url,
-            "last_active_at": user.last_active_at,
-            "updated_at": user.updated_at,
-            "created_at": user.created_at,
-        }
-        Session.commit()
-
-        token = decode_token.sign(
-            {"id": user.id, "email": user.email, "role": user.role},
-            WEBUI_SECRET_KEY,
-            request.app.state.config.JWT_EXPIRES_IN,
-        )
-        return {
-            "id": user.id,
-            "email": user.email,
-            "name": user.name,
-            "role": user.role,
-            "token": token
-        }
-    except requests.exceptions.RequestException as e:
-        log.error(f"DEBUG: Teams auth request failed: {str(e)}")
-        raise HTTPException(401, detail="Authentication failed")
+        return await process_user_session(oauth_manager, request, user_data)
     except Exception as e:
-        log.error(f"DEBUG: Teams auth internal error: {str(e)}")
-        raise HTTPException(500, detail="Internal server error")
+        log.error(f"DEBUG: Teams auth error: {str(e)}")
+        raise HTTPException(401, detail=f"Authentication failed: {str(e)}")
 
 @app.post("/api/teams/auth")
 async def teams_auth_api(request: Request, response: Response, data: dict = Body(...)):
     token = data.get("token")
     redirect_uri = data.get("redirect_uri")
-    return await handle_teams_auth(request, token, redirect_uri)
-
-@app.post("/api/teams/auth/exchange")
-async def teams_auth_exchange(request: Request, response: Response, data: dict = Body(...)):
-    token = data.get("token")
-    redirect_uri = data.get("redirect_uri")
-    return await handle_teams_auth(request, token, redirect_uri)
+    log.debug(f"Processing Teams auth with token: {token[:10]}..., redirect_uri: {redirect_uri}")
+    result = await handle_teams_auth(request, token, redirect_uri)
+    return result
     
 if os.path.exists(FRONTEND_BUILD_DIR):
     mimetypes.add_type("text/javascript", ".js")
