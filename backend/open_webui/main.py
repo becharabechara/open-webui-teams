@@ -1648,7 +1648,8 @@ async def teams_auth_api(request: Request, response: Response, data: dict = Body
         log.error(f"[{request_id}] Invalid request body: not a dictionary")
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
-            content={"detail": "Invalid request body: must be a JSON object"}
+            content={"detail": "Invalid request body: must be a JSON object"},
+            headers={"Content-Type": "application/json", "Connection": "keep-alive"}
         )
 
     token = data.get("token")
@@ -1660,24 +1661,31 @@ async def teams_auth_api(request: Request, response: Response, data: dict = Body
         log.error(f"[{request_id}] Missing token in request body")
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
-            content={"detail": "Missing token in request body"}
+            content={"detail": "Missing token in request body"},
+            headers={"Content-Type": "application/json", "Connection": "keep-alive"}
         )
 
     try:
         result = await handle_teams_auth(request, token, redirect_uri)
         log.info(f"[{request_id}] Teams auth successful for user: {result['email']}")
-        return result
+        return JSONResponse(
+            content=result,
+            status_code=status.HTTP_200_OK,
+            headers={"Content-Type": "application/json", "Connection": "keep-alive"}
+        )
     except HTTPException as e:
         log.error(f"[{request_id}] HTTP exception in teams_auth_api: {str(e)}")
         return JSONResponse(
             status_code=e.status_code,
-            content={"detail": e.detail}
+            content={"detail": e.detail},
+            headers={"Content-Type": "application/json", "Connection": "keep-alive"}
         )
     except Exception as e:
         log.error(f"[{request_id}] Unexpected error in teams_auth_api: {str(e)}")
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"detail": f"Authentication failed: {str(e)}"}
+            content={"detail": f"Authentication failed: {str(e)}"},
+            headers={"Content-Type": "application/json", "Connection": "keep-alive"}
         )
     
 if os.path.exists(FRONTEND_BUILD_DIR):
