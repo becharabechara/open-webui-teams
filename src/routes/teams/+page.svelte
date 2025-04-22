@@ -2,7 +2,10 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { getContext } from 'svelte';
-	import { user } from '$lib/stores';
+	import { user, socket } from '$lib/stores';
+	import { page } from '$app/stores';
+	import { toast } from 'svelte-sonner';
+	import { getSessionUser } from '$lib/apis/auths';
 
 	const i18n = getContext('i18n');
 	let loading = true;
@@ -11,18 +14,17 @@
 	let teamsContext = false;
 	let teamsMobile = false;
 
-	// Detect if the user is in a Teams context
 	const isTeamsContext = () => {
 		const userAgent = navigator.userAgent.toLowerCase();
 		const isTeams = userAgent.includes("teams");
 		const isEmbedded = 
 			(window.parent === window.self && window.nativeInterface) ||
 			window.name === "embedded-page-container" ||
-			window.name === "extension-tab-frame";
+			window.name === "extension-tab-frame" ||
+			userAgent.includes("electron");
 		return isTeams || isEmbedded;
 	};
 
-	// Detect if the user is on Teams mobile
 	const isTeamsMobile = () => {
 		const userAgent = navigator.userAgent.toLowerCase();
 		const isTeams = userAgent.includes("teams");
@@ -35,35 +37,53 @@
 		if (sessionUser) {
 			if (sessionUser.token) localStorage.token = sessionUser.token;
 			await user.set(sessionUser);
+			$socket.emit('user-join', { auth: { token: sessionUser.token } });
 			if (teamsContext && typeof window.microsoftTeams !== 'undefined') {
 				window.microsoftTeams.appInitialization.notifySuccess();
 			}
-			// Show success banner and redirect to /
-			successMessage = $i18n.t('Connection successful!');
+			toast.success($i18n.t('Connection successful!'));
 			setTimeout(() => {
-				const redirectUrl = '/';
-				if (typeof redirectUrl !== 'string') {
+				const redirectUrl = new URLSearchParams(window.location.search).get('redirect') || '/';
+				if (typeof redirectUrl !== 'string' || !redirectUrl.startsWith('/')) {
 					const error = $i18n.t('Invalid redirect URL');
 					errorMessages = [...errorMessages, { status: 'N/A', message: error, timestamp: new Date().toISOString() }];
+					toast.error(error);
+					goto('/');
 					return;
 				}
+				// Remove splash screen before redirect
+				document.getElementById('splash-screen')?.remove();
 				goto(redirectUrl);
 			}, 2000);
 		}
 	};
 
-	const waitForTeamsSDK = (callback, timeout = 10000) => {
+	const waitForTeamsSDK = (callback, timeout = 20000) => {
 		const startTime = Date.now();
 		function checkSDK() {
 			if (typeof window.microsoftTeams !== 'undefined') {
+				console.debug('Teams SDK loaded successfully');
 				callback();
 			} else if (Date.now() - startTime < timeout) {
 				setTimeout(checkSDK, 100);
 			} else {
 				const error = $i18n.t('Failed to initialize Teams SDK');
 				errorMessages = [...errorMessages, { status: 'N/A', message: error, timestamp: new Date().toISOString() }];
+				toast.error(error);
 				loading = false;
+				// Remove splash screen on error
+				document.getElementById('splash-screen')?.remove();
 			}
+		}
+		const sdkScript = document.querySelector('script[src*="MicrosoftTeams.min.js"]');
+		if (!sdkScript) {
+			const error = $i18n.t('Teams SDK script not found');
+			errorMessages = [...errorMessages, { status: 'N/A', message: error, timestamp: new Date().toISOString() }];
+			toast.error(error);
+			loading = false;
+			// Remove splash screen on error
+			document.getElementById('splash-screen')?.remove();
+			return;
 		}
 		checkSDK();
 	};
@@ -73,12 +93,11 @@
 			const response = await fetch('/api/teams/auth', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-				body: JSON.stringify({ token })
+				body: JSON.stringify({ token }) // Removed redirect from body
 			});
 			const contentType = response.headers.get('content-type') || 'unknown';
 			const status = response.status;
 
-			// Retry on 502
 			if (status === 502 && retryCount < maxRetries) {
 				const error = $i18n.t(`HTTP 502: Retrying (${retryCount + 1}/${maxRetries})`);
 				errorMessages = [...errorMessages, { status, message: error, timestamp: new Date().toISOString() }];
@@ -86,7 +105,6 @@
 				return await tryTeamsAuth(token, retryCount + 1, maxRetries);
 			}
 
-			// Handle errors
 			if (!response.ok) {
 				if (contentType.includes('application/json')) {
 					const errorData = await response.json();
@@ -101,7 +119,23 @@
 				}
 			}
 
-			// Handle JSON response
+			if (response.redirected) {
+				const url = new URL(response.url);
+				const token = url.hash.match(/token=([^&]+)/)?.[1];
+				if (token) {
+					const sessionUser = await getSessionUser(token).catch((error) => {
+						const errMsg = $i18n.t(`Failed to fetch user: ${error}`);
+						errorMessages = [...errorMessages, { status: 'N/A', message: errMsg, timestamp: new Date().toISOString() }];
+						throw new Error(errMsg);
+					});
+					await setSessionUser(sessionUser);
+					return true;
+				}
+				const error = $i18n.t('Invalid redirect: missing token');
+				errorMessages = [...errorMessages, { status, message: error, timestamp: new Date().toISOString() }];
+				throw new Error(error);
+			}
+
 			if (!contentType.includes('application/json')) {
 				const rawText = await response.text();
 				const errorDetails = $i18n.t(`HTTP ${status}, Content-Type: ${contentType}, Response: "${rawText}"`);
@@ -119,38 +153,59 @@
 			throw new Error(error);
 		} catch (error) {
 			loading = false;
+			toast.error(error.message);
+			// Remove splash screen on error
+			document.getElementById('splash-screen')?.remove();
 			return false;
 		}
 	};
 
+	const checkOauthCallback = async () => {
+		if (!$page.url.hash) return;
+		const hash = $page.url.hash.substring(1);
+		if (!hash) return;
+		const params = new URLSearchParams(hash);
+		const token = params.get('token');
+		if (!token) return;
+		const sessionUser = await getSessionUser(token).catch((error) => {
+			toast.error(`${error}`);
+			return null;
+		});
+		if (sessionUser) {
+			await setSessionUser(sessionUser);
+		}
+	};
+
 	onMount(async () => {
-		// Detect Teams context and mobile
 		teamsContext = isTeamsContext();
 		teamsMobile = isTeamsMobile();
 
+		// Remove splash screen initially
+		document.getElementById('splash-screen')?.remove();
+
+		// If user is authenticated, redirect to the specified URL or /
 		if ($user) {
-			// Already authenticated, redirect to /
-			const redirectUrl = '/';
-			if (typeof redirectUrl !== 'string') {
+			const redirectUrl = new URLSearchParams(window.location.search).get('redirect') || '/';
+			if (typeof redirectUrl !== 'string' || !redirectUrl.startsWith('/')) {
 				const error = $i18n.t('Invalid redirect URL');
 				errorMessages = [...errorMessages, { status: 'N/A', message: error, timestamp: new Date().toISOString() }];
+				toast.error(error);
+				goto('/');
 				return;
 			}
 			goto(redirectUrl);
+			loading = false;
 			return;
 		}
 
+		// For non-Teams context, rely on +layout.svelte to handle redirect
 		if (!teamsContext) {
-			// Not in Teams context, redirect to /auth
-			const redirectUrl = '/auth';
-			if (typeof redirectUrl !== 'string') {
-				const error = $i18n.t('Invalid redirect URL');
-				errorMessages = [...errorMessages, { status: 'N/A', message: error, timestamp: new Date().toISOString() }];
-				return;
-			}
-			goto(redirectUrl);
+			loading = false;
 			return;
 		}
+
+		// Proceed with Teams authentication
+		await checkOauthCallback();
 
 		waitForTeamsSDK(() => {
 			try {
@@ -159,18 +214,26 @@
 
 				window.microsoftTeams.authentication.getAuthToken({
 					successCallback: async (token) => {
-						await tryTeamsAuth(token);
+						if (await tryTeamsAuth(token)) {
+							loading = false;
+						}
 					},
 					failureCallback: (error) => {
 						const errMsg = $i18n.t(`Authentication failed: ${error}`);
 						errorMessages = [...errorMessages, { status: 'N/A', message: errMsg, timestamp: new Date().toISOString() }];
+						toast.error(errMsg);
 						loading = false;
+						// Remove splash screen on error
+						document.getElementById('splash-screen')?.remove();
 					}
 				});
 			} catch (error) {
 				const errMsg = $i18n.t(`Teams SDK initialization error: ${error.message}`);
 				errorMessages = [...errorMessages, { status: 'N/A', message: errMsg, timestamp: new Date().toISOString() }];
+				toast.error(errMsg);
 				loading = false;
+				// Remove splash screen on error
+				document.getElementById('splash-screen')?.remove();
 			}
 		});
 	});
@@ -216,35 +279,14 @@
 </div>
 
 <style>
-	/* Ensure table is responsive */
-	.min-w-full {
-		width: 100%;
-	}
-	.overflow-x-auto {
-		overflow-x: auto;
-	}
-	/* Table styling */
-	table {
-		border-collapse: collapse;
-	}
-	th, td {
-		text-align: left;
-	}
-	/* Flexible message column */
-	.break-words {
-		word-break: break-word;
-	}
-	/* Responsive adjustments */
+	.min-w-full { width: 100%; }
+	.overflow-x-auto { overflow-x: auto; }
+	table { border-collapse: collapse; }
+	th, td { text-align: left; }
+	.break-words { word-break: break-word; }
 	@media (max-width: 640px) {
-		.text-2xl {
-			font-size: 1.5rem;
-		}
-		.text-lg {
-			font-size: 1.125rem;
-		}
-		th, td {
-			font-size: 0.75rem;
-			padding: 0.5rem;
-		}
+		.text-2xl { font-size: 1.5rem; }
+		.text-lg { font-size: 1.125rem; }
+		th, td { font-size: 0.75rem; padding: 0.5rem; }
 	}
 </style>
