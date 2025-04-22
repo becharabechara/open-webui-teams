@@ -1476,7 +1476,7 @@ applications.get_swagger_ui_html = swagger_ui_html
 # Microsoft Teams SSO Applicationn Integration
 ##########################################################################
 
-from fastapi import HTTPException, Request, Response, Body
+from fastapi import HTTPException, Request, Response
 from starlette.responses import JSONResponse
 import requests
 import uuid
@@ -1487,11 +1487,11 @@ from open_webui.utils.auth import create_token
 from open_webui.utils.misc import parse_duration
 import logging
 import httpx
+import aiohttp
+import jwt
 from authlib.integrations.base_client import OAuthError
 import asyncio
 from fastapi import status
-
-log = logging.getLogger("open-webui")
 
 async def process_user_session(oauth_manager: OAuthManager, request: Request, user_data: dict):
     """Process user data, manage session, and generate a JWT token."""
@@ -1534,7 +1534,7 @@ async def process_user_session(oauth_manager: OAuthManager, request: Request, us
         oauth_manager.update_user_groups(
             user=user,
             user_data=user_data,
-            default_permissions=request.app.state.config.USER_PERMISSIONS
+            default_permissions=request.app.state.config.USER_PERMISSIONS or {}
         )
 
     # Set session data with validation
@@ -1566,22 +1566,24 @@ async def process_user_session(oauth_manager: OAuthManager, request: Request, us
         "token": token
     }
 
-async def handle_teams_auth(request: Request, token: str, redirect_uri: str = None):
+async def handle_teams_auth(request: Request, token: str, redirect_uri: Optional[str] = None):
+    """Handle Teams authentication by validating the token and retrieving user info."""
     # Generate a unique request ID for tracing
     request_id = str(uuid.uuid4())
-    log.info(f"[{request_id}] Processing Teams auth with token: {token[:10]}..., redirect_uri: {redirect_uri}")
+    log.info(f"Processing Teams auth with token: {token[:10]}..., redirect_uri: {redirect_uri}")
 
     if not token:
-        log.error(f"[{request_id}] No token provided")
+        log.error(f"No token provided")
         raise HTTPException(400, detail="No token provided")
 
     try:
         client = oauth_manager.get_client("microsoft")
         if not client:
-            log.error(f"[{request_id}] Microsoft OAuth provider not configured")
+            log.error(f"Microsoft OAuth provider not configured")
             raise HTTPException(400, detail="Microsoft OAuth provider not configured")
 
         # Attempt token exchange with retry on transient errors
+        log.debug(f"OAuth client initialized for provider: microsoft")
         max_retries = 1
         for attempt in range(max_retries + 1):
             try:
@@ -1593,18 +1595,19 @@ async def handle_teams_auth(request: Request, token: str, redirect_uri: str = No
                     scope="openid profile email User.Read",
                     requested_token_use="on_behalf_of"
                 )
-                log.info(f"[{request_id}] Token exchange successful: access_token={token_data.get('access_token')[:10]}..., id_token={token_data.get('id_token')[:10]}...")
+                log.info(f"Token exchange successful: access_token={token_data.get('access_token')[:10]}..., id_token={token_data.get('id_token')[:10]}...")
+                log.debug(f"Access token payload: {jwt.decode(token_data.get('access_token'), options={'verify_signature': False})}")
                 break
             except (httpx.RequestError, httpx.HTTPStatusError) as e:
+                log.error(f"Token exchange attempt {attempt + 1}/{max_retries} failed: {str(e)}")
                 if attempt == max_retries:
-                    log.error(f"[{request_id}] Token exchange failed after {max_retries} retries: {str(e)}")
                     raise HTTPException(503, detail=f"Token exchange failed: {str(e)}")
-                log.warning(f"[{request_id}] Retry {attempt + 1}/{max_retries} for token exchange: {str(e)}")
+                log.warning(f"Retrying token exchange...")
                 await asyncio.sleep(1)
 
         # Validate token data
         if not token_data.get("access_token") or not token_data.get("id_token"):
-            log.error(f"[{request_id}] Invalid token data: {token_data}")
+            log.error(f"Invalid token data: {token_data}")
             raise HTTPException(400, detail="Invalid token response from provider")
 
         # Set session tokens
@@ -1612,81 +1615,59 @@ async def handle_teams_auth(request: Request, token: str, redirect_uri: str = No
             request.session["access_token"] = token_data.get("access_token")
             request.session["id_token"] = token_data.get("id_token")
         except Exception as e:
-            log.error(f"[{request_id}] Failed to set session tokens: {str(e)}")
+            log.error(f"Failed to set session tokens: {str(e)}")
             raise HTTPException(500, detail="Failed to persist session tokens")
 
-        # Fetch user info
-        try:
-            user_data = await client.userinfo(token=token_data)
-            if not isinstance(user_data, dict):
-                log.error(f"[{request_id}] Invalid userinfo response: {user_data}")
-                raise HTTPException(400, detail="Invalid userinfo response")
-        except OAuthError as e:
-            log.error(f"[{request_id}] OAuth error during userinfo: {str(e)}")
-            raise HTTPException(401, detail=f"Failed to fetch user info: {str(e)}")
-        except httpx.RequestError as e:
-            log.error(f"[{request_id}] Network error during userinfo: {str(e)}")
-            raise HTTPException(503, detail=f"Network error fetching user info: {str(e)}")
-
-        log.info(f"[{request_id}] User data retrieved: email={user_data.get('email', 'unknown')}")
-        return await process_user_session(oauth_manager, request, user_data)
+        # Fetch user info with httpx, retries, and increased timeout
+        max_retries = 2
+        timeout = httpx.Timeout(15.0)
+        for attempt in range(max_retries + 1):
+            try:
+                async with httpx.AsyncClient(timeout=timeout) as custom_client:
+                    client.session = custom_client
+                    user_data = await client.userinfo(token=token_data)
+                    if not isinstance(user_data, dict):
+                        log.error(f"Invalid userinfo response: {user_data}")
+                        raise HTTPException(400, detail="Invalid userinfo response")
+                    log.info(f"User data retrieved: email={user_data.get('email', 'unknown')}")
+                    log.debug(f"User data: {user_data}")
+                    return await process_user_session(oauth_manager, request, user_data)
+            except (httpx.RequestError, httpx.HTTPStatusError) as e:
+                log.error(f"Userinfo attempt {attempt + 1}/{max_retries} failed: {str(e)}")
+                if attempt == max_retries:
+                    raise HTTPException(400, detail=f"Failed to fetch user info: {str(e)}")
+                log.warning(f"Retrying userinfo request...")
+                await asyncio.sleep(1)
 
     except HTTPException as e:
-        log.error(f"[{request_id}] HTTP exception: {str(e)}")
+        log.error(f"HTTP exception: {str(e)}")
         raise e
     except Exception as e:
-        log.error(f"[{request_id}] Unexpected error: {str(e)}")
-        raise HTTPException(500, detail=f"Authentication failed: {str(e)}")
+        log.error(f"Unexpected error: {str(e)}")
+        raise HTTPException(400, detail=f"Authentication failed: {str(e)}")
+
+class TeamsAuthRequest(BaseModel):
+    token: str  # Removed redirect field
 
 @app.post("/api/teams/auth")
-async def teams_auth_api(request: Request, response: Response, data: dict = Body(...)):
-    request_id = str(uuid.uuid4())
-    log.info(f"[{request_id}] Received Teams auth request")
-
-    # Validate input
-    if not isinstance(data, dict):
-        log.error(f"[{request_id}] Invalid request body: not a dictionary")
-        return JSONResponse(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            content={"detail": "Invalid request body: must be a JSON object"},
-            headers={"Content-Type": "application/json", "Connection": "keep-alive", "Accept": "application/json"}
-        )
-
-    token = data.get("token")
-    redirect_uri = data.get("redirect_uri")
-
-    log.info(f"[{request_id}] Token: {token[:10]}..., redirect_uri: {redirect_uri}")
-
-    if not token:
-        log.error(f"[{request_id}] Missing token in request body")
-        return JSONResponse(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            content={"detail": "Missing token in request body"},
-            headers={"Content-Type": "application/json", "Connection": "keep-alive", "Accept": "application/json"}
-        )
-
+async def teams_auth_api(request: Request, body: TeamsAuthRequest):
     try:
-        result = await handle_teams_auth(request, token, redirect_uri)
-        log.info(f"[{request_id}] Teams auth successful for user: {result['email']}")
-        return JSONResponse(
-            content=result,
-            status_code=status.HTTP_200_OK,
-            headers={"Content-Type": "application/json", "Connection": "keep-alive", "Accept": "application/json"}
-        )
-    except HTTPException as e:
-        log.error(f"[{request_id}] HTTP exception in teams_auth_api: {str(e)}")
-        return JSONResponse(
-            status_code=e.status_code,
-            content={"detail": e.detail},
-            headers={"Content-Type": "application/json", "Connection": "keep-alive", "Accept": "application/json"}
-        )
+        log.info(f"Received Teams auth request with token: {body.token[:10]}...")
+        log.debug(f"Request headers: {dict(request.headers)}")
+
+        # Construct redirect URI dynamically (for logging purposes)
+        base_url = str(request.base_url).rstrip("/")
+        redirect_uri = f"{base_url}/oauth/microsoft/callback"
+
+        user = await handle_teams_auth(request, body.token, redirect_uri)
+        log.info(f"Teams auth successful for user: {user['email']}")
+
+        # Return user data directly
+        return user
+
     except Exception as e:
-        log.error(f"[{request_id}] Unexpected error in teams_auth_api: {str(e)}")
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"detail": f"Authentication failed: {str(e)}"},
-            headers={"Content-Type": "application/json", "Connection": "keep-alive", "Accept": "application/json"}
-        )
+        log.exception(f"Unexpected error in teams_auth_api: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
     
 if os.path.exists(FRONTEND_BUILD_DIR):
     mimetypes.add_type("text/javascript", ".js")
