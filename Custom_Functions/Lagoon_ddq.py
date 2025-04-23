@@ -1,28 +1,8 @@
 """
-title: Lagoon API Pipeline
-author: becharabechara
-author_url: https://github.com/bbechara-tikehaucapital
-version: 0.3.1
-license: MIT
-description: A pipeline for communicating with Lagoon API Exposed via Archipel
-features:
-v0.1.0 - bechara:
-  - Communicating with Lagoon API
-  - Customizable API endpoint,key, and certificate verification
-  - Error handling and logging
-  - Citation support
-v0.2.0 - Moez:
-  - Async API calls
-  - Enhanced status management
-  - Streaming support
-  - Prompt on uploaded files
-v0.3.1 - bechara:
-  - All calls are send to Lagoon API
-  - Env Variables aren't set by default
-  - Detection of Web Search Tool And Boolean added to Payload
-v0.3.2 - Moez:
-  - Add API Citations
-  - Add API Status
+title: LagoonDDQ  API Pipeline
+author: moez
+version: 0.1.0
+description: A pipeline for communicating with Lagoon DDQ API Exposed via Archipel
 """
 
 from typing import Union, AsyncGenerator, Dict, Any, Optional, List
@@ -31,6 +11,7 @@ import traceback
 import httpx
 import json
 import os
+from typing import Dict, Any
 from pydantic import BaseModel, Field
 import logging
 import urllib3
@@ -43,17 +24,11 @@ logger = logging.getLogger(__name__)
 
 class UserValves(BaseModel):
     lagoon_api_taskendpoint: str = Field(
-        default=os.getenv(
-            "LAGOON_API_TASKENDPOINT",
-            "https://api-dev.tikehaucapital.com/lagoon/api/chatv2/taskopenwebui",
-        ),
+        default="https://api-dev.tikehaucapital.com/lagoon/api/chatv2/taskopenwebui",
         description="Lagoon API endpoint",
     )
     lagoon_api_endpoint: str = Field(
-        default=os.getenv(
-            "LAGOON_API_ENDPOINT",
-            "https://api-dev.tikehaucapital.com/lagoon/api/chatv2/chatopenwebuistreaming",
-        ),
+        default="https://api-dev.tikehaucapital.com/lagoon/api/ddqv2/chatopenwebui",
         description="Lagoon API endpoint",
     )
     lagoon_api_key: str = Field(
@@ -84,12 +59,10 @@ class Pipe:
         __user__: Dict[str, Any] = None,
         __request__: Request = None,
         __event_emitter__=None,
-        __task__=None,
-        __metadata__=None,
     ):
         """Make the pipe callable for Open WebUI."""
         return self.pipe(
-            body, __user__, __request__, __event_emitter__, __task__, __metadata__
+            body, __user__, __request__, __event_emitter__, __source_context__
         )
 
     async def pipe(
@@ -99,7 +72,6 @@ class Pipe:
         __request__: Request = None,
         __event_emitter__=None,
         __task__=None,
-        __metadata__: Dict[str, Any] = None,
     ) -> Union[str, AsyncGenerator[str, None], Dict[str, Any]]:
         """Custom pipe that processes user messages and communicates with the Lagoon API."""
         try:
@@ -117,18 +89,14 @@ class Pipe:
                 }
                 return
 
-            # Extract WebSearchActivated from __metadata__['features']['web_search']
-            web_search_activated = False  # Default value
-            if __metadata__ and "features" in __metadata__:
-                web_search_activated = __metadata__["features"].get("web_search", False)
-
-            # Prepare message history
+            # Extract the latest prompt and history
             history = self._prepare_history(messages)
 
             # Handle task if present
             if __task__:
+                logger.info(f"Task: {__task__}")
                 result = await self._process_task(
-                    user_email, history, web_search_activated, __event_emitter__
+                    user_email, history, __event_emitter__
                 )
                 yield result
                 return
@@ -142,9 +110,13 @@ class Pipe:
                     }
                 )
 
+            # logger.info(body.get("messages"))
+            # Moez
+            # history = self._prepare_history(messages)
+
             # Make API call and stream response
             async for chunk in self._stream_api_response(
-                user_email, history, web_search_activated, __event_emitter__
+                user_email, history, __event_emitter__
             ):
                 yield chunk
 
@@ -153,6 +125,7 @@ class Pipe:
         except Exception as e:
             yield await self._handle_error(e, "Unexpected error", __event_emitter__)
         finally:
+            # Always send the final "done" status, even if an error occurs
             if __event_emitter__:
                 await __event_emitter__(
                     {
@@ -213,17 +186,11 @@ class Pipe:
             for msg in messages
         ]
 
-    async def _process_task(
-        self, user_email, history, web_search_activated, __event_emitter__
-    ):
+    async def _process_task(self, user_email, history, __event_emitter__):
         """Process internal tasks (title/tags generation)."""
         try:
-            # Prepare payload with user email, message history, and web search status
-            payload = {
-                "User": user_email,
-                "Messages": history,
-                "WebSearchActivated": web_search_activated,
-            }
+            # Prepare payload with user email and message history
+            payload = {"User": user_email, "Messages": history}
             headers = {"Content-Type": "application/json"}
             api_taskendpoint = self.valves.lagoon_api_taskendpoint
 
@@ -239,16 +206,14 @@ class Pipe:
         except Exception:
             return ""
 
-    async def _stream_api_response(
-        self, user_email, history, web_search_activated, __event_emitter__
-    ):
+    async def _stream_api_response(self, user_email, history, __event_emitter__):
         """Stream the API response to the client."""
         # Prepare payload and headers
-        payload = {
-            "User": user_email,
-            "Messages": history,
-            "WebSearchActivated": web_search_activated,
-        }
+        payload = {"User": user_email, "Messages": history}
+
+        payload_json = json.dumps(payload, ensure_ascii=False)
+        # logger.info(f"-------------->payload:{payload_json}")
+
         headers = {
             "Accept": "text/plain",
             "Content-Type": "application/json; charset=utf-8",
@@ -261,7 +226,7 @@ class Pipe:
 
         # Make API call
         async with httpx.AsyncClient(
-            verify=self.valves.lagoon_server_certificate, timeout=120
+            verify=self.valves.lagoon_server_certificate, timeout=60
         ) as client:
             async with client.stream(
                 "POST",
@@ -271,49 +236,52 @@ class Pipe:
             ) as response:
                 response.raise_for_status()
 
-                first_chunk_received = False
-                async for chunk in response.aiter_text():
-                    if chunk:
+                # Read the full response body as a single string
+                full_response = await response.aread()
+                full_response_str = (
+                    full_response.decode()
+                    if isinstance(full_response, bytes)
+                    else full_response
+                )
 
-                        # API Notifications
-                        jsonblock = chunk.strip()
-                        if jsonblock.startswith("{") and jsonblock.endswith("}"):
-                            try:
-                                obj = json.loads(jsonblock)
-                                obj_type = obj.get("type")
+                await __event_emitter__(
+                    {
+                        "type": "status",
+                        "data": {
+                            "description": "Answering",
+                            "hidden": True,
+                        },
+                    }
+                )
 
-                                # Notification types (citation, status, replace)
-                                if obj_type in {"citation", "status"}:
-                                    await __event_emitter__(obj)
-                                    continue
-                            except json.JSONDecodeError:
-                                pass
+                # Yield the entire string at once
+                yield full_response_str
 
-                        # Update Status, Answering
-                        if not first_chunk_received:
-                            first_chunk_received = True
-                            await __event_emitter__(
-                                {
-                                    "type": "status",
-                                    "data": {
-                                        "description": "Answering",
-                                        "hidden": True,
-                                    },
-                                }
-                            )
-
-                        # Send chunk in real-time to Open Web UI
-                        yield chunk
-
-                        # For smooth streaming
-                        # await asyncio.sleep(0.02)
+                # first_chunk_received = False
+                # async for chunk in response.aiter_text():
+                #    if chunk:
+                #        if not first_chunk_received:
+                #            first_chunk_received = True
+                #            await __event_emitter__(
+                #                {
+                #                    "type": "status",
+                #                    "data": {
+                #                        "description": "Answering",
+                #                        "hidden": True,
+                #                    },
+                #                }
+                #            )
+                #        # Send chunk in real-time to Open Web UI
+                #        yield chunk
+                #        # For smooth streaming
+                #        await asyncio.sleep(0.02)
 
     async def _handle_error(self, exception, error_type, __event_emitter__):
         """Handle and format errors."""
         tb = traceback.extract_tb(exception.__traceback__)
-        error_msg = f"{error_type}: {str(exception)}\n{''.join(traceback.format_tb(exception.__traceback__))}"
-        logger.error(error_msg)
         error_msg = f"{error_type}: {str(exception)}"
+        logger.error(error_msg)
+
         if __event_emitter__:
             await __event_emitter__(
                 {
