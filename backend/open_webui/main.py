@@ -1478,35 +1478,78 @@ applications.get_swagger_ui_html = swagger_ui_html
 
 from open_webui.utils.oauth import auth_manager_config
 from open_webui.utils.misc import parse_duration
-from open_webui.utils.auth import create_token  
+from open_webui.utils.auth import create_token
 from open_webui.env import WEBUI_AUTH_COOKIE_SAME_SITE, WEBUI_AUTH_COOKIE_SECURE
 import httpx
 import jwt
 import uuid
+import logging
+import base64
+import mimetypes
+import aiohttp
+from fastapi import HTTPException, Request
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
-async def process_user_session(oauth_manager: OAuthManager, request: Request, user_data: dict):
-    """Process user data, manage session, and generate a JWT token."""
+# Ensure debug logging for compatibility, but use INFO for Teams steps
+log = logging.getLogger("open_webui")
+log.setLevel(logging.DEBUG)
+
+async def process_user_session(oauth_manager: OAuthManager, request: Request, user_data: dict, access_token: str, id_token: str):
+    """Process user data, fetch profile image, and generate a JWT token."""
+    log.info("Entering process_user_session")
     sub = user_data.get("sub")
     if not sub:
+        log.error("Missing subject ID in user_data")
         raise HTTPException(400, detail="Invalid credentials: Missing subject ID")
     provider_sub = f"microsoft@{sub}"
     email = user_data.get(auth_manager_config.OAUTH_EMAIL_CLAIM, "").lower()
     if not email:
+        log.error("Missing email in user_data")
         raise HTTPException(400, detail="Invalid credentials: Missing email")
+
+    # Fetch and encode profile image
+    picture_url = user_data.get(auth_manager_config.OAUTH_PICTURE_CLAIM, "/user.png")
+    log.info(f"Profile image URL: {picture_url}")
+    if picture_url and picture_url.startswith("https://graph.microsoft.com"):
+        try:
+            async with aiohttp.ClientSession() as session:
+                headers = {"Authorization": f"Bearer {access_token}"}
+                log.info(f"Fetching profile image with headers: {headers}")
+                async with session.get(picture_url, headers=headers) as resp:
+                    if resp.ok:
+                        picture = await resp.read()
+                        base64_encoded_picture = base64.b64encode(picture).decode("utf-8")
+                        guessed_mime_type = mimetypes.guess_type(picture_url)[0] or "image/jpeg"
+                        picture_url = f"data:{guessed_mime_type};base64,{base64_encoded_picture}"
+                        log.info(f"Converted profile image to base64: {picture_url[:50]}...")
+                    else:
+                        error_text = await resp.text()
+                        log.warning(f"No profile image found for user {email}: {resp.status} {error_text}")
+                        picture_url = "/user.png"
+                        log.info(f"Using default image: {picture_url}")
+        except Exception as e:
+            log.error(f"Error fetching profile image for user {email}: {str(e)}")
+            picture_url = "/user.png"
+            log.info(f"Using default image: {picture_url}")
 
     user = Users.get_user_by_oauth_sub(provider_sub)
     if not user and auth_manager_config.OAUTH_MERGE_ACCOUNTS_BY_EMAIL:
+        log.info(f"No user found by oauth_sub, checking by email: {email}")
         user = Users.get_user_by_email(email)
         if user:
+            log.info(f"Found user by email, updating oauth_sub: {provider_sub}")
             Users.update_user_oauth_sub_by_id(user.id, provider_sub)
 
     role = oauth_manager.get_user_role(user, user_data)
+    log.info(f"User role: {role}")
 
     if not user:
         if not auth_manager_config.ENABLE_OAUTH_SIGNUP:
-            raise HTTPException(403, detail="Account creation is disabled")
-        picture_url = user_data.get(auth_manager_config.OAUTH_PICTURE_CLAIM, "/user.png")
+            log.error("Account creation disabled")
+            raise HTTPException(403, detail="Account creation disabled")
         name = user_data.get(auth_manager_config.OAUTH_USERNAME_CLAIM, email.split("@")[0])
+        log.info(f"Creating new user: email={email}, name={name}, picture_url={picture_url}")
         user = Users.insert_new_user(
             id=str(uuid.uuid4()),
             email=email,
@@ -1517,31 +1560,24 @@ async def process_user_session(oauth_manager: OAuthManager, request: Request, us
         )
     else:
         if user.role != role:
+            log.info(f"Updating user role from {user.role} to {role}")
             Users.update_user_role_by_id(user.id, role)
-        Users.update_user_by_id(user.id, {"last_active_at": int(time.time())})
+        log.info(f"Updating user with picture_url: {picture_url}")
+        Users.update_user_by_id(user.id, {
+            "last_active_at": int(time.time()),
+            "profile_image_url": picture_url
+        })
 
     # Update user groups if enabled
     if auth_manager_config.ENABLE_OAUTH_GROUP_MANAGEMENT and role != "admin":
+        log.info("Updating user groups")
         oauth_manager.update_user_groups(
             user=user,
             user_data=user_data,
             default_permissions=request.app.state.config.USER_PERMISSIONS or {}
         )
 
-    # Store minimal session data to reduce header size
-    try:
-        request.session["user"] = {
-            "id": user.id,
-            "email": user.email,
-            "name": user.name,
-            "role": user.role,
-            "profile_image_url": user.profile_image_url,
-        }
-        Session.commit()
-    except Exception as e:
-        log.error(f"Failed to set session data: {str(e)}")
-        raise HTTPException(500, detail="Failed to persist session")
-
+    log.info(f"Creating JWT token for user: {user.id}")
     token = create_token(
         data={"id": user.id},
         expires_delta=parse_duration(auth_manager_config.JWT_EXPIRES_IN)
@@ -1557,21 +1593,24 @@ async def process_user_session(oauth_manager: OAuthManager, request: Request, us
 async def handle_teams_auth(request: Request, token: str, redirect_uri: Optional[str] = None):
     """Handle Teams authentication by validating the token and retrieving user info."""
     log.info(f"Processing Teams auth with token: {token[:10]}..., redirect_uri: {redirect_uri}")
+    log.info(f"Full token length: {len(token)} bytes")
 
     if not token:
-        log.error(f"No token provided")
+        log.error("No token provided")
         raise HTTPException(400, detail="No token provided")
 
     try:
+        log.info("Initializing OAuth client for microsoft")
         client = oauth_manager.get_client("microsoft")
         if not client:
-            log.error(f"Microsoft OAuth provider not configured")
+            log.error("Microsoft OAuth provider not configured")
             raise HTTPException(400, detail="Microsoft OAuth provider not configured")
 
-        log.debug(f"OAuth client initialized for provider: microsoft")
+        log.info("OAuth client initialized for provider: microsoft")
         max_retries = 1
         for attempt in range(max_retries + 1):
             try:
+                log.info(f"Attempting token exchange: attempt {attempt + 1}/{max_retries + 1}")
                 token_data = await client.fetch_access_token(
                     grant_type="urn:ietf:params:oauth:grant-type:jwt-bearer",
                     assertion=token,
@@ -1581,10 +1620,11 @@ async def handle_teams_auth(request: Request, token: str, redirect_uri: Optional
                     requested_token_use="on_behalf_of"
                 )
                 log.info(f"Token exchange successful: access_token={token_data.get('access_token')[:10]}..., id_token={token_data.get('id_token')[:10]}...")
+                log.info(f"Token data: access_token_len={len(token_data.get('access_token', ''))}, id_token_len={len(token_data.get('id_token', ''))}")
                 access_token_payload = jwt.decode(token_data.get('access_token'), options={'verify_signature': False})
-                log.debug(f"Access token payload: {access_token_payload}")
-                log.debug(f"Access token size: {len(token_data.get('access_token'))} bytes")
-                log.debug(f"ID token size: {len(token_data.get('id_token'))} bytes")
+                log.info(f"Access token payload: {access_token_payload}")
+                log.info(f"Access token size: {len(token_data.get('access_token'))} bytes")
+                log.info(f"ID token size: {len(token_data.get('id_token'))} bytes")
                 break
             except (httpx.RequestError, httpx.HTTPStatusError) as e:
                 log.error(f"Token exchange attempt {attempt + 1}/{max_retries} failed: {str(e)}")
@@ -1601,20 +1641,18 @@ async def handle_teams_auth(request: Request, token: str, redirect_uri: Optional
         timeout = httpx.Timeout(15.0)
         for attempt in range(max_retries + 1):
             try:
-                async with httpx.AsyncClient(timeout=timeout) as custom_client:
-                    client.session = custom_client
-                    user_data = await client.userinfo(token=token_data)
-                    if not isinstance(user_data, dict):
-                        log.error(f"Invalid userinfo response: {user_data}")
-                        raise HTTPException(400, detail="Invalid userinfo response")
-                    log.info(f"User data retrieved: email={user_data.get('email', 'unknown')}")
-                    log.debug(f"User data: {user_data}")
-                    user_response = await process_user_session(oauth_manager, request, user_data)
-                    # Return user response and id_token for cookie setting
-                    return {
-                        "user": user_response,
-                        "id_token": token_data.get("id_token")
-                    }
+                log.info(f"Attempting userinfo fetch: attempt {attempt + 1}/{max_retries + 1}")
+                user_data = await client.userinfo(token=token_data)
+                if not isinstance(user_data, dict):
+                    log.error(f"Invalid userinfo response: {user_data}")
+                    raise HTTPException(400, detail="Invalid userinfo response")
+                log.info(f"User data retrieved: email={user_data.get('email', 'unknown')}")
+                log.info(f"User data: {user_data}")
+                user_response = await process_user_session(oauth_manager, request, user_data, token_data.get("access_token"), token_data.get("id_token"))
+                return {
+                    "user": user_response,
+                    "id_token": token_data.get("id_token")
+                }
             except (httpx.RequestError, httpx.HTTPStatusError) as e:
                 log.error(f"Userinfo attempt {attempt + 1}/{max_retries} failed: {str(e)}")
                 if attempt == max_retries:
@@ -1634,18 +1672,23 @@ class TeamsAuthRequest(BaseModel):
 
 @app.post("/api/teams/auth")
 async def teams_auth_api(request: Request, body: TeamsAuthRequest):
+    log.info("Entering teams_auth_api")
     try:
         log.info(f"Received Teams auth request with token: {body.token[:10]}...")
-        log.debug(f"Request headers: {dict(request.headers)}")
+        log.info(f"Request headers: {dict(request.headers)}")
+        log.info(f"Request body token length: {len(body.token)} bytes")
 
         base_url = str(request.base_url).rstrip("/")
         redirect_uri = f"{base_url}/oauth/microsoft/callback"
+        log.info(f"Constructed redirect_uri: {redirect_uri}")
 
         result = await handle_teams_auth(request, body.token, redirect_uri)
         user = result["user"]
         id_token = result["id_token"]
+        log.info(f"Received user: {user}, id_token length: {len(id_token)} bytes")
 
         response = JSONResponse(content=user)
+        log.info("Setting oauth_id_token cookie")
         response.set_cookie(
             key="oauth_id_token",
             value=id_token,
@@ -1653,15 +1696,10 @@ async def teams_auth_api(request: Request, body: TeamsAuthRequest):
             samesite=WEBUI_AUTH_COOKIE_SAME_SITE,
             secure=WEBUI_AUTH_COOKIE_SECURE,
         )
-        # Log response header size for debugging
-        headers = dict(response.headers)
-        total_header_size = sum(len(k) + len(str(v)) for k, v in headers.items())
-        log.debug(f"Response headers: {headers}")
-        log.debug(f"Total response header size: {total_header_size} bytes")
         return response
 
     except Exception as e:
-        log.exception(f"Unexpected error in teams_auth_api: {str(e)}")
+        log.error(f"Unexpected error in teams_auth_api: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
     
 if os.path.exists(FRONTEND_BUILD_DIR):

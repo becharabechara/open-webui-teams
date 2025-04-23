@@ -10,6 +10,7 @@
 	const i18n = getContext('i18n');
 	let loading = true;
 	let errorMessages = [];
+	let stepMessages = [];
 	let successMessage = '';
 	let teamsContext = false;
 	let teamsMobile = false;
@@ -33,7 +34,12 @@
 		return isTeams && isMobile && isTeamsMobileApp;
 	};
 
+	const addStepMessage = (message) => {
+		stepMessages = [...stepMessages, { message, timestamp: new Date().toISOString() }];
+	};
+
 	const setSessionUser = async (sessionUser) => {
+		addStepMessage($i18n.t('Setting session user'));
 		if (sessionUser) {
 			if (sessionUser.token) localStorage.token = sessionUser.token;
 			await user.set(sessionUser);
@@ -51,18 +57,29 @@
 					goto('/');
 					return;
 				}
+				// Clear messages on success
+				errorMessages = [];
+				stepMessages = [];
+				loading = false;
 				// Remove splash screen before redirect
 				document.getElementById('splash-screen')?.remove();
+				addStepMessage($i18n.t('Redirecting to: ' + redirectUrl));
 				goto(redirectUrl);
 			}, 2000);
+		} else {
+			const error = $i18n.t('Invalid session user data');
+			errorMessages = [...errorMessages, { status: 'N/A', message: error, timestamp: new Date().toISOString() }];
+			toast.error(error);
+			loading = false;
 		}
 	};
 
 	const waitForTeamsSDK = (callback, timeout = 20000) => {
+		addStepMessage($i18n.t('Waiting for Teams SDK'));
 		const startTime = Date.now();
 		function checkSDK() {
 			if (typeof window.microsoftTeams !== 'undefined') {
-				console.debug('Teams SDK loaded successfully');
+				addStepMessage($i18n.t('Teams SDK loaded successfully'));
 				callback();
 			} else if (Date.now() - startTime < timeout) {
 				setTimeout(checkSDK, 100);
@@ -89,14 +106,27 @@
 	};
 
 	const tryTeamsAuth = async (token, retryCount = 0, maxRetries = 3) => {
+		addStepMessage($i18n.t(`Attempting Teams auth, retry ${retryCount + 1}/${maxRetries}`));
 		try {
+			const headers = {
+				'Content-Type': 'application/json',
+				'Accept': 'application/json'
+			};
+			const body = JSON.stringify({ token });
+			const headerSize = Object.entries(headers).reduce((sum, [key, value]) => sum + key.length + value.length, 0);
+			const totalRequestSize = headerSize + body.length;
+			addStepMessage($i18n.t(`Auth request headers size: ${headerSize} bytes, Total request size: ${totalRequestSize} bytes`));
 			const response = await fetch('/api/teams/auth', {
 				method: 'POST',
-				headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-				body: JSON.stringify({ token }) // Removed redirect from body
+				headers: headers,
+				body: body
 			});
 			const contentType = response.headers.get('content-type') || 'unknown';
 			const status = response.status;
+			const responseHeaders = {};
+			response.headers.forEach((value, key) => { responseHeaders[key] = value; });
+			const responseHeaderSize = Object.entries(responseHeaders).reduce((sum, [key, value]) => sum + key.length + value.length, 0);
+			addStepMessage($i18n.t(`Auth response headers size: ${responseHeaderSize} bytes`));
 
 			if (status === 502 && retryCount < maxRetries) {
 				const error = $i18n.t(`HTTP 502: Retrying (${retryCount + 1}/${maxRetries})`);
@@ -161,6 +191,7 @@
 	};
 
 	const checkOauthCallback = async () => {
+		addStepMessage($i18n.t('Checking OAuth callback'));
 		if (!$page.url.hash) return;
 		const hash = $page.url.hash.substring(1);
 		if (!hash) return;
@@ -168,7 +199,9 @@
 		const token = params.get('token');
 		if (!token) return;
 		const sessionUser = await getSessionUser(token).catch((error) => {
-			toast.error(`${error}`);
+			const errMsg = $i18n.t(`Failed to fetch user: ${error}`);
+			errorMessages = [...errorMessages, { status: 'N/A', message: errMsg, timestamp: new Date().toISOString() }];
+			toast.error(errMsg);
 			return null;
 		});
 		if (sessionUser) {
@@ -177,6 +210,7 @@
 	};
 
 	onMount(async () => {
+		addStepMessage($i18n.t('Initializing Teams context'));
 		teamsContext = isTeamsContext();
 		teamsMobile = isTeamsMobile();
 
@@ -185,6 +219,7 @@
 
 		// If user is authenticated, redirect to the specified URL or /
 		if ($user) {
+			addStepMessage($i18n.t('User already authenticated'));
 			const redirectUrl = new URLSearchParams(window.location.search).get('redirect') || '/';
 			if (typeof redirectUrl !== 'string' || !redirectUrl.startsWith('/')) {
 				const error = $i18n.t('Invalid redirect URL');
@@ -193,13 +228,18 @@
 				goto('/');
 				return;
 			}
-			goto(redirectUrl);
+			// Clear messages on success
+			errorMessages = [];
+			stepMessages = [];
 			loading = false;
+			addStepMessage($i18n.t('Redirecting to: ' + redirectUrl));
+			goto(redirectUrl);
 			return;
 		}
 
 		// For non-Teams context, rely on +layout.svelte to handle redirect
 		if (!teamsContext) {
+			addStepMessage($i18n.t('Non-Teams context, exiting'));
 			loading = false;
 			return;
 		}
@@ -209,11 +249,15 @@
 
 		waitForTeamsSDK(() => {
 			try {
+				addStepMessage($i18n.t('Initializing Teams SDK'));
 				window.microsoftTeams.initialize();
+				addStepMessage($i18n.t('Notifying app loaded'));
 				window.microsoftTeams.appInitialization.notifyAppLoaded();
 
+				addStepMessage($i18n.t('Requesting auth token'));
 				window.microsoftTeams.authentication.getAuthToken({
 					successCallback: async (token) => {
+						addStepMessage($i18n.t('Auth token received'));
 						if (await tryTeamsAuth(token)) {
 							loading = false;
 						}
@@ -240,11 +284,8 @@
 </script>
 
 <div class="w-full h-screen flex flex-col items-center justify-center p-4 space-y-4">
-	{#if successMessage}
-		<div class="w-full bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 p-4 rounded">
-			<h2 class="text-lg font-semibold mb-2">{$i18n.t('Success')}</h2>
-			<p class="text-sm">{$i18n.t(successMessage)}</p>
-		</div>
+	{#if loading}
+		<div class="text-gray-600 dark:text-gray-300 text-sm">{$i18n.t('Authenticating...')}</div>
 	{/if}
 
 	{#if errorMessages.length > 0}
@@ -273,8 +314,35 @@
 		</div>
 	{/if}
 
-	{#if loading}
-		<div class="text-gray-600 dark:text-gray-300 text-sm">{$i18n.t('Authenticating...')}</div>
+	{#if stepMessages.length > 0}
+		<div class="w-full bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 p-4 rounded">
+			<h2 class="text-lg font-semibold mb-2">{$i18n.t('Steps')}</h2>
+			<div class="overflow-x-auto">
+				<table class="min-w-full text-sm text-left">
+					<thead class="text-xs uppercase bg-blue-200 dark:bg-blue-800">
+						<tr>
+							<th scope="col" class="px-4 py-2 whitespace-nowrap">{$i18n.t('Timestamp')}</th>
+							<th scope="col" class="px-4 py-2">{$i18n.t('Message')}</th>
+						</tr>
+					</thead>
+					<tbody>
+						{#each stepMessages as step}
+							<tr class="border-b dark:border-blue-700">
+								<td class="px-4 py-2 whitespace-nowrap">{new Date(step.timestamp).toLocaleString()}</td>
+								<td class="px-4 py-2 break-words">{step.message}</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
+		</div>
+	{/if}
+
+	{#if successMessage}
+		<div class="w-full bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 p-4 rounded">
+			<h2 class="text-lg font-semibold mb-2">{$i18n.t('Success')}</h2>
+			<p class="text-sm">{$i18n.t(successMessage)}</p>
+		</div>
 	{/if}
 </div>
 
