@@ -60,6 +60,18 @@ services:
       - open-webui
     restart: unless-stopped
 
+  tika:
+    image: apache/tika:${TIKA_VERSION-2.9.1.0}  # Reference version from .env
+    container_name: tika
+    restart: unless-stopped
+    ports:
+      - ${TIKA_PORT-9998}:9998  # Reference port from .env
+    healthcheck:
+      test: ["CMD", "curl", "-f", "${TIKA_SERVER_ENDPOINT}/tika"]  # Use .env variable
+      interval: ${TIKA_HEALTHCHECK_INTERVAL-30s}
+      timeout: ${TIKA_HEALTHCHECK_TIMEOUT-10s}
+      retries: ${TIKA_HEALTHCHECK_RETRIES-3}
+
 volumes:
   ollama: {}
   open-webui: {}
