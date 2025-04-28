@@ -2,7 +2,7 @@
 title: Lagoon API Pipeline
 author: becharabechara
 author_url: https://github.com/bbechara-tikehaucapital
-version: 0.3.1
+version: 0.3.3
 license: MIT
 description: A pipeline for communicating with Lagoon API Exposed via Archipel
 features:
@@ -23,6 +23,9 @@ v0.3.1 - bechara:
 v0.3.2 - Moez:
   - Add API Citations
   - Add API Status
+v0.3.3 - Moez:
+  - Document Full Content if (One document)
+  - Status Document Mode.
 """
 
 from typing import Union, AsyncGenerator, Dict, Any, Optional, List
@@ -35,6 +38,7 @@ from pydantic import BaseModel, Field
 import logging
 import urllib3
 from fastapi import Request
+import re
 
 # Set up logging (minimal, errors only)
 logging.basicConfig(level=logging.INFO)
@@ -100,6 +104,7 @@ class Pipe:
         __event_emitter__=None,
         __task__=None,
         __metadata__: Dict[str, Any] = None,
+        __files__=None,
     ) -> Union[str, AsyncGenerator[str, None], Dict[str, Any]]:
         """Custom pipe that processes user messages and communicates with the Lagoon API."""
         try:
@@ -123,12 +128,16 @@ class Pipe:
                 web_search_activated = __metadata__["features"].get("web_search", False)
 
             # Prepare message history
-            history = self._prepare_history(messages)
+            history = self._prepare_history(messages, __files__)
 
             # Handle task if present
             if __task__:
                 result = await self._process_task(
-                    user_email, history, web_search_activated, __event_emitter__
+                    user_email,
+                    history,
+                    web_search_activated,
+                    __event_emitter__,
+                    __task__,
                 )
                 yield result
                 return
@@ -203,8 +212,34 @@ class Pipe:
 
         return user_email
 
-    def _prepare_history(self, messages):
+    def _prepare_history(self, messages, files):
         """Extract and format message history."""
+
+        # If only one document and content length < 150,000 characters, use the entire file content
+        if files and len(files) == 1:
+
+            # logger.info(files[0])
+            file_data = files[0]["file"]["data"]
+            content = file_data.get("content", "")
+
+            if len(content) < 150000:
+                # Find systeme message
+                for message in messages:
+                    if message.get("role") == "system":
+                        system_message = message.get("content", "")
+
+                        # Replace message context, <context/>
+                        new_system_message = re.sub(
+                            r"<context>(.*?)</context>",
+                            f"<context>\n{content}\n</context>",
+                            system_message,
+                            flags=re.DOTALL,
+                        )
+
+                        # Update system message
+                        message["content"] = new_system_message
+                        break
+
         return [
             {
                 "content": msg.get("content", ""),
@@ -214,9 +249,23 @@ class Pipe:
         ]
 
     async def _process_task(
-        self, user_email, history, web_search_activated, __event_emitter__
+        self, user_email, history, web_search_activated, event_emitter, task
     ):
         """Process internal tasks (title/tags generation)."""
+
+        if task == "query_generation":
+            if event_emitter:
+                # 1. Affiche le message
+                await event_emitter(
+                    {
+                        "type": "message",
+                        "data": {
+                            "content": f"📚 **Document Mode**\n\n",
+                            "citations": [],
+                        },
+                    }
+                )
+
         try:
             # Prepare payload with user email, message history, and web search status
             payload = {
@@ -231,7 +280,7 @@ class Pipe:
                 verify=self.valves.lagoon_server_certificate, timeout=30
             ) as client:
                 response = await client.post(
-                    api_taskendpoint, json=payload, headers=headers
+                    api_taskendpoint, json=payload, hea_process_taskders=headers
                 )
 
             response.raise_for_status()
