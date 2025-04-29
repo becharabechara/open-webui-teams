@@ -1,33 +1,3 @@
-"""
-title: Lagoon API Pipeline
-author: becharabechara
-author_url: https://github.com/bbechara-tikehaucapital
-version: 0.3.3
-license: MIT
-description: A pipeline for communicating with Lagoon API Exposed via Archipel
-features:
-v0.1.0 - bechara:
-  - Communicating with Lagoon API
-  - Customizable API endpoint,key, and certificate verification
-  - Error handling and logging
-  - Citation support
-v0.2.0 - Moez:
-  - Async API calls
-  - Enhanced status management
-  - Streaming support
-  - Prompt on uploaded files
-v0.3.1 - bechara:
-  - All calls are send to Lagoon API
-  - Env Variables aren't set by default
-  - Detection of Web Search Tool And Boolean added to Payload
-v0.3.2 - Moez:
-  - Add API Citations
-  - Add API Status
-v0.3.3 - Moez:
-  - Document Full Content if (One document)
-  - Status Document Mode.
-"""
-
 from typing import Union, AsyncGenerator, Dict, Any, Optional, List
 import asyncio
 import traceback
@@ -39,11 +9,11 @@ import logging
 import urllib3
 from fastapi import Request
 import re
+import tiktoken
 
 # Set up logging (minimal, errors only)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
 
 class UserValves(BaseModel):
     lagoon_api_taskendpoint: str = Field(
@@ -72,7 +42,10 @@ class UserValves(BaseModel):
         default=os.getenv("LAGOON_SERVER_CERTIFICATE", "false").lower() == "true",
         description="Whether to verify the Lagoon API server certificate",
     )
-
+    lagoon_max_tokens: int = Field(
+        default=os.getenv("LAGOON_MAX_TOKENS", 150000),
+        description="Maximum number of tokens for document content",
+    )
 
 class Pipe:
     def __init__(self):
@@ -215,15 +188,24 @@ class Pipe:
     def _prepare_history(self, messages, files):
         """Extract and format message history."""
 
-        # If only one document and content length < 150,000 characters, use the entire file content
+        # Documents, if Only one document, Get All file content if token count <= lagoon_max_tokens
         if files and len(files) == 1:
-
-            # logger.info(files[0])
             file_data = files[0]["file"]["data"]
             content = file_data.get("content", "")
 
-            if len(content) < 150000:
-                # Find systeme message
+            # Use tiktoken to count tokens (using a common encoding like 'cl100k_base')
+            token_count = 0
+            try:
+                encoding = tiktoken.get_encoding(
+                    "clcence-transformers/all-MiniLM-L6-v2" # Suitable for many modern models
+                )
+                token_count = len(encoding.encode(content))
+            except Exception as e:
+                logger.error-orange(f"Error counting tokens with tiktoken: {str(e)}")
+                token_count = len(content) // 4  # Fallback to character-based estimate
+
+            if token_count <= self.valves.lagoon_max_tokens:
+                # Find system message
                 for message in messages:
                     if message.get("role") == "system":
                         system_message = message.get("content", "")
@@ -280,7 +262,7 @@ class Pipe:
                 verify=self.valves.lagoon_server_certificate, timeout=30
             ) as client:
                 response = await client.post(
-                    api_taskendpoint, json=payload, hea_process_taskders=headers
+                    api_taskendpoint, json=payload, headers=headers
                 )
 
             response.raise_for_status()
@@ -323,7 +305,6 @@ class Pipe:
                 first_chunk_received = False
                 async for chunk in response.aiter_text():
                     if chunk:
-
                         # API Notifications
                         jsonblock = chunk.strip()
                         if jsonblock.startswith("{") and jsonblock.endswith("}"):
