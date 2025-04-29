@@ -8,6 +8,9 @@ from open_webui.env import SRC_LOG_LEVELS, VERSION
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["WEBHOOK"])
 
+# Add a constant for the local favicon path
+# Adjust this path to match your actual static files structure
+LOCAL_FAVICON_PATH = "/static/favicon.ico"  
 
 def post_webhook(name: str, url: str, message: str, event_data: dict) -> bool:
     try:
@@ -40,7 +43,8 @@ def post_webhook(name: str, url: str, message: str, event_data: dict) -> bool:
                     {
                         "activityTitle": message,
                         "activitySubtitle": f"{name} ({VERSION}) - {action}",
-                        "activityImage": WEBUI_FAVICON_URL,
+                        # "activityImage": WEBUI_FAVICON_URL,
+                        "activityImage": LOCAL_FAVICON_PATH,
                         "facts": facts,
                         "markdown": True,
                     }

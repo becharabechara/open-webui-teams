@@ -33,6 +33,8 @@ def set_security_headers() -> Dict[str, str]:
     that constructs the header. If the environment variable is set, the
     corresponding header is added to the options dictionary.
 
+    ENABLE_TEAMS_XFRAME takes precedence over XFRAME_OPTIONS and uses Content-Security-Policy frame-ancestors.
+
     Returns:
         dict: A dictionary containing the security headers and their values.
     """
@@ -49,12 +51,28 @@ def set_security_headers() -> Dict[str, str]:
         "CONTENT_SECURITY_POLICY": set_content_security_policy,
     }
 
+    # Process all headers except XFRAME_OPTIONS
     for env_var, setter in header_setters.items():
-        value = os.environ.get(env_var, None)
-        if value:
-            header = setter(value)
+        if env_var != "XFRAME_OPTIONS":  # Skip XFRAME_OPTIONS initially
+            value = os.environ.get(env_var)
+            if value is not None:
+                header = setter(value)
+                if header:
+                    options.update(header)
+
+    # Handle ENABLE_TEAMS_XFRAME with CSP taking precedence
+    enable_teams_xframe = os.environ.get("ENABLE_TEAMS_XFRAME", "False").lower() == "true"
+    if enable_teams_xframe:
+        header = set_content_security_policy_teams()
+        options.update(header)
+    else:
+        xframe_value = os.environ.get("XFRAME_OPTIONS")
+        if xframe_value is not None:
+            header = set_xframe(xframe_value)
             if header:
                 options.update(header)
+        if "X-Frame-Options" not in options and "Content-Security-Policy" not in options:
+            options["X-Frame-Options"] = "DENY"
 
     return options
 
@@ -70,6 +88,8 @@ def set_hsts(value: str):
 
 # Set X-Frame-Options response header
 def set_xframe(value: str):
+    if value == "":
+        return {}  # Empty string means no header
     pattern = r"^(DENY|SAMEORIGIN)$"
     match = re.match(pattern, value, re.IGNORECASE)
     if not match:
@@ -130,4 +150,14 @@ def set_xpermitted_cross_domain_policies(value: str):
 
 # Set Content-Security-Policy response header
 def set_content_security_policy(value: str):
+    return {"Content-Security-Policy": value}
+
+
+# Set Content-Security-Policy for Teams-specific frame-ancestors
+def set_content_security_policy_teams():
+    """
+    Sets the Content-Security-Policy header specifically for Microsoft Teams integration,
+    allowing framing only from 'self' and 'https://teams.microsoft.com'.
+    """
+    value = "frame-ancestors 'self' https://teams.microsoft.com"
     return {"Content-Security-Policy": value}

@@ -56,6 +56,16 @@
 
 	const BREAKPOINT = 768;
 
+	const isTeamsContext = () => {
+		const userAgent = navigator.userAgent.toLowerCase();
+		const isTeams = userAgent.includes("teams");
+		const isEmbedded = 
+			(window.parent === window.self && window.nativeInterface) ||
+			window.name === "embedded-page-container" ||
+			window.name === "extension-tab-frame";
+		return isTeams || isEmbedded;
+	};
+
 	const setupSocket = async (enableWebsocket) => {
 		const _socket = io(`${WEBUI_BASE_URL}` || undefined, {
 			reconnection: true,
@@ -549,14 +559,19 @@
 						await user.set(sessionUser);
 						await config.set(await getBackendConfig());
 					} else {
-						// Redirect Invalid Session User to /auth Page
-						localStorage.removeItem('token');
-						await goto(`/auth?redirect=${encodedUrl}`);
+						// Skip redirect to /auth for Teams context on /teams
+						if (isTeamsContext() && $page.url.pathname === '/teams') {
+							console.log('Skipping /auth redirect in Teams context on /teams');
+						} else {
+							localStorage.removeItem('token');
+							await goto(`/auth?redirect=${encodedUrl}`);
+						}
 					}
 				} else {
-					// Don't redirect if we're already on the auth page
-					// Needed because we pass in tokens from OAuth logins via URL fragments
-					if ($page.url.pathname !== '/auth') {
+					// Skip redirect to /auth for Teams context on /teams
+					if (isTeamsContext() && $page.url.pathname === '/teams') {
+						console.log('Skipping /auth redirect in Teams context on /teams');
+					} else if ($page.url.pathname !== '/auth') {
 						await goto(`/auth?redirect=${encodedUrl}`);
 					}
 				}
@@ -600,6 +615,7 @@
 
 		return () => {
 			window.removeEventListener('resize', onResize);
+			document.removeEventListener('visibilitychange', handleVisibilityChange);
 		};
 	});
 </script>
