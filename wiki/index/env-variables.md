@@ -80,6 +80,9 @@ This section documents the environment variables configured for the OpenWebUI pr
 - `LAGOON_SERVER_CERTIFICATE="false"`  
   Disables server certificate verification for the Lagoon API, likely for testing or development purposes. In production, this should be set to `true` for security.
 
+- `LAGOON_MAX_TOKENS="150000"`  
+  Specifies the maximum number of tokens allowed for document content processing in the Lagoon API pipeline. Defaults to 150,000 if not set, controlling the size of documents included in API requests.
+
 ## Vector Database Configuration
 
 - `VECTOR_DB_PROVIDER="qdrant"`  
