@@ -14,19 +14,39 @@ services:
       args:
         OLLAMA_BASE_URL: '/ollama'
       dockerfile: Dockerfile
-    image: ghcr.io/open-webui/open-webui:${WEBUI_DOCKER_TAG-main}
+    image: open-webui:v0.5.2
+    # Uncomment if you prefer a pre-built image instead of building locally
+    # image: ghcr.io/open-webui/open-webui:${WEBUI_DOCKER_TAG-main}
     container_name: open-webui
     volumes:
       - open-webui:/app/backend/data
     depends_on:
       - ollama
+      - qdrant
     ports:
       - ${OPEN_WEBUI_PORT-3000}:8080
     env_file:
       - .env
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY}
     extra_hosts:
       - host.docker.internal:host-gateway
+      - api-dev.tikehaucapital.com:192.168.10.53  # Direct IP mapping as fallback
+    dns:
+      - 192.168.10.10  # Your local DNS server for internal resolution
+      - 8.8.8.8       # Fallback to Google DNS
     restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant
+    container_name: qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
 
   ngrok:
     image: ngrok/ngrok:latest
@@ -40,6 +60,19 @@ services:
       - open-webui
     restart: unless-stopped
 
+  tika:
+    image: apache/tika:${TIKA_VERSION-2.9.1.0}  # Reference version from .env
+    container_name: tika
+    restart: unless-stopped
+    ports:
+      - ${TIKA_PORT-9998}:9998  # Reference port from .env
+    healthcheck:
+      test: ["CMD", "curl", "-f", "${TIKA_SERVER_ENDPOINT}/tika"]  # Use .env variable
+      interval: ${TIKA_HEALTHCHECK_INTERVAL-30s}
+      timeout: ${TIKA_HEALTHCHECK_TIMEOUT-10s}
+      retries: ${TIKA_HEALTHCHECK_RETRIES-3}
+
 volumes:
   ollama: {}
   open-webui: {}
+  qdrant_data: {}

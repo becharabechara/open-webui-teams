@@ -47,6 +47,7 @@ from open_webui.utils.access_control import has_access
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["OPENAI"])
 
+from open_webui.config import AZURE_AI_API_VERSION
 
 ##########################################
 #
@@ -470,6 +471,7 @@ async def get_models(
                     headers={
                         "Authorization": f"Bearer {key}",
                         "Content-Type": "application/json",
+                        "API-Version": AZURE_AI_API_VERSION,
                         **(
                             {
                                 "X-OpenWebUI-User-Name": user.name,
@@ -550,6 +552,7 @@ async def verify_connection(
                 headers={
                     "Authorization": f"Bearer {key}",
                     "Content-Type": "application/json",
+                    "API-Version": AZURE_AI_API_VERSION,
                     **(
                         {
                             "X-OpenWebUI-User-Name": user.name,
@@ -704,6 +707,7 @@ async def generate_chat_completion(
             headers={
                 "Authorization": f"Bearer {key}",
                 "Content-Type": "application/json",
+                "API-Version": AZURE_AI_API_VERSION,
                 **(
                     {
                         "HTTP-Referer": "https://openwebui.com/",
@@ -791,6 +795,7 @@ async def proxy(path: str, request: Request, user=Depends(get_verified_user)):
             headers={
                 "Authorization": f"Bearer {key}",
                 "Content-Type": "application/json",
+                "API-Version": AZURE_AI_API_VERSION,
                 **(
                     {
                         "X-OpenWebUI-User-Name": user.name,

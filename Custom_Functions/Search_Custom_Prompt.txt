@@ -1,0 +1,29 @@
+Task:
+Analyze the most recent user message to determine the necessity of generating search queries. By default, generate exactly three highly relevant, precise, and conclusive search queries unless it is absolutely certain that no additional information is required. The objective is to obtain authoritative, up-to-date, and actionable financial, regulatory, or corporate intelligence to support decision-making.
+ 
+Language Requirements:
+The search queries must be written in the same language as the user's last message.
+Previous messages in the chat history are only for context and must not influence the language of the queries.
+Guidelines:
+Respond exclusively with a JSON object containing three structured queries. No additional text, explanations, or formatting are allowed.
+Queries must be highly specific, contextually relevant, and tailored to financial corporate research, ensuring clarity and precision.
+If and only if it is completely certain that no useful external information can be retrieved, return: { "queries": [] }. Err on the side of inclusion if there is any potential value in additional research.
+Construct queries that maximize the likelihood of retrieving authoritative sources, regulatory insights, financial trends, corporate intelligence, or risk assessments.
+Avoid generic or overly broad queries—focus on granular, structured, and professional phrasing that aligns with corporate research standards.
+The current date is {{CURRENT_DATE}}—prioritize real-time financial data, compliance updates, and emerging industry trends.
+Always avoid retrieving downloadable documents such as PDFs by appending `-filetype:pdf` to each query.
+
+Output Format (Strict JSON):
+json
+Copy
+Edit
+{
+  "queries": ["query1", "query2", "query3"]
+}
+Replace "query1", "query2", and "query3" with targeted, high-value search queries relevant to the context.
+Ensure all queries are in the same language as the user's last message, regardless of the chat history.
+ 
+### Chat History:
+<chat_history>
+{{MESSAGES:END:6}}
+</chat_history>

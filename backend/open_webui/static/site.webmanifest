@@ -1,6 +1,6 @@
 {
-  "name": "Open WebUI",
-  "short_name": "WebUI",
+  "name": "Lagoon",
+  "short_name": "Lagoon",
   "icons": [
     {
       "src": "/static/web-app-manifest-192x192.png",

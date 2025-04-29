@@ -823,6 +823,21 @@ OLLAMA_API_CONFIGS = PersistentConfig(
 )
 
 ####################################
+# OPENAI_API_VERSION
+####################################
+
+AZURE_AI_API_VERSION = PersistentConfig(
+    "AZURE_AI_API_VERSION",
+    "azure_ai.api_version",
+    os.environ.get("AZURE_AI_API_VERSION", "2024-05-01-preview"),
+)
+
+OPENAI_EMBEDDINGS_API_VERSION = PersistentConfig(
+    "OPENAI_EMBEDDINGS_API_VERSION",
+    "openai.embeddings_api_version",
+    os.environ.get("OPENAI_EMBEDDINGS_API_VERSION", "2023-05-15"),
+)
+####################################
 # OPENAI_API
 ####################################
 
