@@ -19,6 +19,9 @@ Welcome to the OpenWebUI Modifications Wiki. This wiki documents all custom modi
 - [Initial OpenWebUI Setup](/index/initial-setup.md)  
   Guides through the initial setup process for OpenWebUI, including admin settings and custom function configuration.
 
+- [Updating OpenWebUI Image](/index/version-update.md)  
+  Outlines the procedure to update the OpenWebUI image by pulling changes from the official repository, testing locally, and committing to Azure DevOps.
+
 ---
 
 *Note*: This page will be updated as new modification sections are added to the wiki.
