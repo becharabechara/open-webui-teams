@@ -59,9 +59,9 @@ This section outlines the procedure to update the OpenWebUI image by pulling the
 
 After merging, ensure that none of your custom modifications are affected. Refer to the following wiki pages for the specific files and modifications to check:
 
-- **[Tikehau Capital Lagoon Branding](/tikehau-branding.md)**: Verify that all branding-related static resources and configuration changes are preserved.
-- **[Azure AI Foundry Support](/azure-ai-foundry.md)**: Confirm that the Azure AI API version configurations and backend modifications for API calls are intact.
-- **[Teams Custom Integration](/teams-integration.md)**: Ensure that all Teams-related changes, including SDK integration, authentication routes, and security headers, are unaffected.
+- **[Tikehau Capital Lagoon Branding](/index/tikehau-branding.md)**: Verify that all branding-related static resources and configuration changes are preserved.
+- **[Azure AI Foundry Support](/index/azure-ai-foundry.md)**: Confirm that the Azure AI API version configurations and backend modifications for API calls are intact.
+- **[Teams Custom Integration](/index/teams-integration.md)**: Ensure that all Teams-related changes, including SDK integration, authentication routes, and security headers, are unaffected.
 
 ### Special Attention: Authentication Functions in `backend/open_webui/main.py`
 
@@ -102,9 +102,9 @@ Before committing changes, build and test the updated image locally to ensure co
 
 4. **Verify Functionality**:
    - **SSO Authentication**: Log in using Entra ID SSO to ensure the OAuth flow works correctly.
-   - **Teams Integration**: Test the Teams authentication flow by accessing the `/teams` route or embedding OpenWebUI in a Teams tab (refer to [Teams Custom Integration](/teams-integration.md)).
-   - **Branding**: Verify that all Tikehau Capital Lagoon branding assets are displayed correctly (refer to [Tikehau Capital Lagoon Branding](/tikehau-branding.md)).
-   - **Azure AI Foundry**: Test API calls to Azure AI Foundry to ensure the custom configurations are functioning (refer to [Azure AI Foundry Support](/azure-ai-foundry.md)).
+   - **Teams Integration**: Test the Teams authentication flow by accessing the `/teams` route or embedding OpenWebUI in a Teams tab (refer to [Teams Custom Integration](/index/teams-integration.md)).
+   - **Branding**: Verify that all Tikehau Capital Lagoon branding assets are displayed correctly (refer to [Tikehau Capital Lagoon Branding](/index/tikehau-branding.md)).
+   - **Azure AI Foundry**: Test API calls to Azure AI Foundry to ensure the custom configurations are functioning (refer to [Azure AI Foundry Support](/index/azure-ai-foundry.md)).
    - **General Functionality**: Test core features like chat, document processing, and model interactions to ensure no regressions.
 
 5. **Troubleshoot Issues**:
