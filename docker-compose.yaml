@@ -14,7 +14,7 @@ services:
       args:
         OLLAMA_BASE_URL: '/ollama'
       dockerfile: Dockerfile
-    image: open-webui:v0.5.2
+    image: open-webui:v0.5.3
     # Uncomment if you prefer a pre-built image instead of building locally
     # image: ghcr.io/open-webui/open-webui:${WEBUI_DOCKER_TAG-main}
     container_name: open-webui
