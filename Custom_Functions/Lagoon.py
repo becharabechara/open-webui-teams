@@ -1,3 +1,35 @@
+"""
+title: Lagoon API Pipeline
+author: becharabechara
+author_url: https://github.com/bbechara-tikehaucapital
+version: 0.3.4
+license: MIT
+description: A pipeline for communicating with Lagoon API Exposed via Archipel
+features:
+v0.1.0 - bechara:
+  - Communicating with Lagoon API
+  - Customizable API endpoint,key, and certificate verification
+  - Error handling and logging
+  - Citation support
+v0.2.0 - Moez:
+  - Async API calls
+  - Enhanced status management
+  - Streaming support
+  - Prompt on uploaded files
+v0.3.1 - bechara:
+  - All calls are send to Lagoon API
+  - Env Variables aren't set by default
+  - Detection of Web Search Tool And Boolean added to Payload
+v0.3.2 - Moez:
+  - Add API Citations
+  - Add API Status
+v0.3.3 - Moez:
+  - Document Full Content if (One document)
+  - Status Document Mode.
+v0.3.4 - Moez:
+  - Change from 150000 Character to 150000 Token
+"""
+
 from typing import Union, AsyncGenerator, Dict, Any, Optional, List
 import asyncio
 import traceback
@@ -201,7 +233,7 @@ class Pipe:
                 )
                 token_count = len(encoding.encode(content))
             except Exception as e:
-                logger.error-orange(f"Error counting tokens with tiktoken: {str(e)}")
+                logger.error(f"Error counting tokens with tiktoken: {str(e)}")
                 token_count = len(content) // 4  # Fallback to character-based estimate
 
             if token_count <= self.valves.lagoon_max_tokens:
