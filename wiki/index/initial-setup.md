@@ -45,7 +45,8 @@ Navigate to the **Admin Panel** in OpenWebUI to configure the settings as follow
 - **Search Result Count**: Set to `2`. This limits the number of search results returned to 2.
 - **Concurrent Requests**: Set to `2`. This allows up to 2 concurrent web search requests.
 - **Bypass Embedding and Retrieval**: Set to `On`. This skips embedding and retrieval steps for web search results, directly using raw search data.
-- **Bypass SSL Verification for Websites**: Set to `On`. This disables SSL verification for web search requests, useful for testing but should be re-evaluated for production.
+- **Web Loader Engine**: Set to `playwright`. This changes the default Web Loader Enginer used by Open WebUI to playwright and it's mandatory to assist in file document detection as we have detected in our tests, as Open WebUI checks the value `WEB_LOADER_ENGINE` to run this command `python -c "import nltk; nltk.download('punkt_tab')"`.
+- **Playwright WebSocket URL**: Set to `ws://localhost:3000`. This value should match the websocket port configured in the AKS deployment as well. 
 
 ### Code Execution Tab
 
@@ -66,7 +67,7 @@ Navigate to the **Admin Panel** in OpenWebUI to configure the settings as follow
 ### Documents Tab
 
 - **Content Extraction Engine**: Select `Tika` from the dropdown.
-  - Verify that the URL matches the environment variable `TIKA_SERVER_ENDPOINT`, which should be `http://tika:9998`.
+  - Verify that the URL matches the environment variable `TIKA_SERVER_ENDPOINT`, which should be `http://localhost:9998`.
 - **Bypass Embedding and Retrieval**: Ensure this is `Not Active`. This ensures embeddings are generated for document content.
 - **Text Splitter**: Select `Tiktoken`. This uses the Tiktoken library for text splitting.
 - **Chunk Size**: Set to `1000`. This defines the size of text chunks for processing.
