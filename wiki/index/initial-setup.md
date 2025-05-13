@@ -80,7 +80,8 @@ Navigate to the **Admin Panel** in OpenWebUI to configure the settings as follow
   - **Top K Reranker**: Set to `10`. This reranks the top 10 results for better relevance.
   - **Minimum Score**: Set to `0`. This includes all results regardless of score.
 - **RAG Template**: Replace the default RAG template with the one from the DevOps repository at `/Custom_Functions/RAG_Custom_Prompt.txt`.
-- **Files Max Upload Size and Count**: Set to `5`. This limits the maximum number of files that can be uploaded at once to 5.
+- **Files Max Upload Size**: Set to `5`. This limits the maximum size of files that can be uploaded to 5 MB per file.
+- **Files Max Upload Count**: Set to `20`. This limits the maximum number of files that can be uploaded at once to 20.
 
 ### Models Tab
 
