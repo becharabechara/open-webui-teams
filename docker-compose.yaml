@@ -23,19 +23,18 @@ services:
     depends_on:
       - ollama
       - qdrant
+      - docling
+      - playwright
     ports:
       - ${OPEN_WEBUI_PORT-3000}:8080
     env_file:
       - .env
-    environment:
-      - OLLAMA_BASE_URL=http://ollama:11434
-      - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY}
     extra_hosts:
       - host.docker.internal:host-gateway
-      - api-dev.tikehaucapital.com:192.168.10.53  # Direct IP mapping as fallback
+      - api-dev.tikehaucapital.com:192.168.10.53
     dns:
-      - 192.168.10.10  # Your local DNS server for internal resolution
-      - 8.8.8.8       # Fallback to Google DNS
+      - 192.168.10.10
+      - 8.8.8.8
     restart: unless-stopped
 
   qdrant:
@@ -55,22 +54,44 @@ services:
       - .env
     command: "http open-webui:8080 --domain=${NGROK_DOMAIN}"
     ports:
-      - "4040:4040"  # Optional: Expose ngrok dashboard
+      - "4040:4040"
     depends_on:
       - open-webui
     restart: unless-stopped
 
   tika:
-    image: apache/tika:${TIKA_VERSION-2.9.1.0}  # Reference version from .env
+    image: apache/tika:${TIKA_VERSION-2.9.1.0}
     container_name: tika
     restart: unless-stopped
     ports:
-      - ${TIKA_PORT-9998}:9998  # Reference port from .env
+      - ${TIKA_PORT-9998}:9998
     healthcheck:
-      test: ["CMD", "curl", "-f", "${TIKA_SERVER_ENDPOINT}/tika"]  # Use .env variable
+      test: ["CMD", "curl", "-f", "${TIKA_SERVER_ENDPOINT}/tika"]
       interval: ${TIKA_HEALTHCHECK_INTERVAL-30s}
       timeout: ${TIKA_HEALTHCHECK_TIMEOUT-10s}
       retries: ${TIKA_HEALTHCHECK_RETRIES-3}
+
+  docling:
+    image: quay.io/docling-project/docling-serve:${DOCLING_VERSION-latest}
+    container_name: docling
+    restart: unless-stopped
+    ports:
+      - ${DOCLING_PORT-5001}:5001
+    environment:
+      - DOCLING_SERVE_ENABLE_UI=${DOCLING_SERVE_ENABLE_UI-true}
+      - DOCLING_OCR_ENGINE=${DOCLING_OCR_ENGINE-tesseract}
+      - DOCLING_OCR_LANGUAGES=${DOCLING_OCR_LANGUAGES-eng}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "${DOCLING_SERVER_ENDPOINT}/health"]
+      interval: ${DOCLING_HEALTHCHECK_INTERVAL-30s}
+      timeout: ${DOCLING_HEALTHCHECK_TIMEOUT-10s}
+      retries: ${DOCLING_HEALTHCHECK_RETRIES-3}
+
+  playwright:
+    image: mcr.microsoft.com/playwright:v1.49.1-noble
+    container_name: playwright
+    command: npx -y playwright@1.49.1 run-server --port 3000 --host 0.0.0.0
+    restart: unless-stopped
 
 volumes:
   ollama: {}
