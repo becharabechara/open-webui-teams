@@ -79,6 +79,7 @@ def query_doc(
     collection_name: str, query_embedding: list[float], k: int, user: UserModel = None
 ):
     try:
+        log.debug(f"query_doc:doc {collection_name}")
         result = VECTOR_DB_CLIENT.search(
             collection_name=collection_name,
             vectors=[query_embedding],
@@ -96,6 +97,7 @@ def query_doc(
 
 def get_doc(collection_name: str, user: UserModel = None):
     try:
+        log.debug(f"get_doc:doc {collection_name}")
         result = VECTOR_DB_CLIENT.get(collection_name=collection_name)
 
         if result:
@@ -118,6 +120,7 @@ def query_doc_with_hybrid_search(
     r: float,
 ) -> dict:
     try:
+        log.debug(f"query_doc_with_hybrid_search:doc {collection_name}")
         bm25_retriever = BM25Retriever.from_texts(
             texts=collection_result.documents[0],
             metadatas=collection_result.metadatas[0],
@@ -170,6 +173,7 @@ def query_doc_with_hybrid_search(
         )
         return result
     except Exception as e:
+        log.exception(f"Error querying doc {collection_name} with hybrid search: {e}")
         raise e
 
 
@@ -205,7 +209,7 @@ def merge_and_sort_query_results(query_results: list[dict], k: int) -> dict:
 
         for distance, document, metadata in zip(distances, documents, metadatas):
             if isinstance(document, str):
-                doc_hash = hashlib.md5(
+                doc_hash = hashlib.sha256(
                     document.encode()
                 ).hexdigest()  # Compute a hash for uniqueness
 
@@ -258,22 +262,47 @@ def query_collection(
     k: int,
 ) -> dict:
     results = []
-    for query in queries:
-        query_embedding = embedding_function(query, prefix=RAG_EMBEDDING_QUERY_PREFIX)
-        for collection_name in collection_names:
+    error = False
+
+    def process_query_collection(collection_name, query_embedding):
+        try:
             if collection_name:
-                try:
-                    result = query_doc(
-                        collection_name=collection_name,
-                        k=k,
-                        query_embedding=query_embedding,
-                    )
-                    if result is not None:
-                        results.append(result.model_dump())
-                except Exception as e:
-                    log.exception(f"Error when querying the collection: {e}")
-            else:
-                pass
+                result = query_doc(
+                    collection_name=collection_name,
+                    k=k,
+                    query_embedding=query_embedding,
+                )
+                if result is not None:
+                    return result.model_dump(), None
+            return None, None
+        except Exception as e:
+            log.exception(f"Error when querying the collection: {e}")
+            return None, e
+
+    # Generate all query embeddings (in one call)
+    query_embeddings = embedding_function(queries, prefix=RAG_EMBEDDING_QUERY_PREFIX)
+    log.debug(
+        f"query_collection: processing {len(queries)} queries across {len(collection_names)} collections"
+    )
+
+    with ThreadPoolExecutor() as executor:
+        future_results = []
+        for query_embedding in query_embeddings:
+            for collection_name in collection_names:
+                result = executor.submit(
+                    process_query_collection, collection_name, query_embedding
+                )
+                future_results.append(result)
+        task_results = [future.result() for future in future_results]
+
+    for result, err in task_results:
+        if err is not None:
+            error = True
+        elif result is not None:
+            results.append(result)
+
+    if error and not results:
+        log.warning("All collection queries failed. No results returned.")
 
     return merge_and_sort_query_results(results, k=k)
 
@@ -294,6 +323,9 @@ def query_collection_with_hybrid_search(
     collection_results = {}
     for collection_name in collection_names:
         try:
+            log.debug(
+                f"query_collection_with_hybrid_search:VECTOR_DB_CLIENT.get:collection {collection_name}"
+            )
             collection_results[collection_name] = VECTOR_DB_CLIENT.get(
                 collection_name=collection_name
             )
@@ -615,6 +647,9 @@ def generate_openai_batch_embeddings(
     user: UserModel = None,
 ) -> Optional[list[list[float]]]:
     try:
+        log.debug(
+            f"generate_openai_batch_embeddings:model {model} batch size: {len(texts)}"
+        )
         json_data = {"input": texts, "model": model}
         if isinstance(RAG_EMBEDDING_PREFIX_FIELD_NAME, str) and isinstance(prefix, str):
             json_data[RAG_EMBEDDING_PREFIX_FIELD_NAME] = prefix
@@ -658,6 +693,9 @@ def generate_ollama_batch_embeddings(
     user: UserModel = None,
 ) -> Optional[list[list[float]]]:
     try:
+        log.debug(
+            f"generate_ollama_batch_embeddings:model {model} batch size: {len(texts)}"
+        )
         json_data = {"input": texts, "model": model}
         if isinstance(RAG_EMBEDDING_PREFIX_FIELD_NAME, str) and isinstance(prefix, str):
             json_data[RAG_EMBEDDING_PREFIX_FIELD_NAME] = prefix
@@ -783,7 +821,9 @@ class RerankCompressor(BaseDocumentCompressor):
             )
             scores = util.cos_sim(query_embedding, document_embedding)[0]
 
-        docs_with_scores = list(zip(documents, scores.tolist()))
+        docs_with_scores = list(
+            zip(documents, scores.tolist() if not isinstance(scores, list) else scores)
+        )
         if self.r_score:
             docs_with_scores = [
                 (d, s) for d, s in docs_with_scores if s >= self.r_score
