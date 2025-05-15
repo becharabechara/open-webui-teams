@@ -14,17 +14,17 @@ services:
       args:
         OLLAMA_BASE_URL: '/ollama'
       dockerfile: Dockerfile
-    image: open-webui:v0.5.4
-    # Uncomment if you prefer a pre-built image instead of building locally
-    # image: ghcr.io/open-webui/open-webui:${WEBUI_DOCKER_TAG-main}
+    image: lagoon-open-webui:v0.5.4
     container_name: open-webui
     volumes:
       - open-webui:/app/backend/data
+      - jupyter-data:/sandbox/persistent
     depends_on:
       - ollama
       - qdrant
       - docling
       - playwright
+      - jupyter
     ports:
       - ${OPEN_WEBUI_PORT-3000}:8080
     env_file:
@@ -35,7 +35,47 @@ services:
     dns:
       - 192.168.10.10
       - 8.8.8.8
+    command: >
+      bash -c "chown -R 0:0 /app/backend/data && \
+               groupadd -g 1000 sharedgroup || true && \
+               chgrp -R sharedgroup /sandbox/persistent && \
+               chmod -R g+w /sandbox/persistent && \
+               bash /app/backend/start.sh"
     restart: unless-stopped
+
+  jupyter:
+    build:
+      context: .
+      dockerfile: Dockerfile-jupyter
+    image: custom-jupyter:python-3.11
+    container_name: jupyter
+    volumes:
+      - jupyter-data:/sandbox/persistent
+    ports:
+      - 8888:8888
+    environment:
+      - JUPYTER_ENABLE_LAB=yes
+      - JUPYTER_TOKEN=${CODE_EXECUTION_JUPYTER_AUTH_TOKEN}
+      - NB_UID=1000
+      - NB_GID=100
+      - CHOWN_HOME=yes
+      - CHOWN_HOME_OPTS=-R
+      - CHOWN_EXTRA=/sandbox/persistent
+      - CHOWN_EXTRA_OPTS=-R
+      - NB_DIR=/sandbox/persistent
+      - JUPYTER_LOG_LEVEL=DEBUG
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2g
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:8888/jupyter/api?token=${CODE_EXECUTION_JUPYTER_AUTH_TOKEN} > /dev/null"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
   qdrant:
     image: qdrant/qdrant
@@ -67,7 +107,7 @@ services:
       - ${TIKA_PORT-9998}:9998
     healthcheck:
       test: ["CMD", "curl", "-f", "${TIKA_SERVER_ENDPOINT}/tika"]
-      interval: ${TIKA_HEALTHCHECK_INTERVAL-30s}
+      interval: ${TIKA_HEALTHCHECK_INTERVAL-60s}
       timeout: ${TIKA_HEALTHCHECK_TIMEOUT-10s}
       retries: ${TIKA_HEALTHCHECK_RETRIES-3}
 
@@ -77,13 +117,11 @@ services:
     restart: unless-stopped
     ports:
       - ${DOCLING_PORT-5001}:5001
-    environment:
-      - DOCLING_SERVE_ENABLE_UI=${DOCLING_SERVE_ENABLE_UI-true}
-      - DOCLING_OCR_ENGINE=${DOCLING_OCR_ENGINE-tesseract}
-      - DOCLING_OCR_LANGUAGES=${DOCLING_OCR_LANGUAGES-eng}
+    env_file:
+      - .env
     healthcheck:
       test: ["CMD", "curl", "-f", "${DOCLING_SERVER_ENDPOINT}/health"]
-      interval: ${DOCLING_HEALTHCHECK_INTERVAL-30s}
+      interval: ${DOCLING_HEALTHCHECK_INTERVAL-60s}
       timeout: ${DOCLING_HEALTHCHECK_TIMEOUT-10s}
       retries: ${DOCLING_HEALTHCHECK_RETRIES-3}
 
@@ -97,3 +135,4 @@ volumes:
   ollama: {}
   open-webui: {}
   qdrant_data: {}
+  jupyter-data: {}

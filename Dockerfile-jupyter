@@ -1,0 +1,38 @@
+# Use the official Jupyter base notebook image with Python 3.11
+FROM jupyter/base-notebook:python-3.11
+
+# Stay as root user to install dependencies and set up the entrypoint
+USER root
+
+# Install system dependencies for WeasyPrint and gosu
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
+    libglib2.0-0 \
+    libharfbuzz0b \
+    libffi-dev \
+    libcairo2 \
+    libpango1.0-dev \
+    gosu && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Python packages
+RUN pip install --no-cache-dir \
+    pandas \
+    matplotlib \
+    openpyxl \
+    weasyprint \
+    reportlab
+
+# Copy the entrypoint script
+COPY jupyter-entrypoint.sh /jupyter-entrypoint.sh
+RUN chmod +x /jupyter-entrypoint.sh
+
+# Set the entrypoint
+ENTRYPOINT ["/jupyter-entrypoint.sh"]
+
+# Set the working directory
+WORKDIR /home/jovyan
+
+# Note: We do NOT set USER jovyan here, as the entrypoint script will handle the user switch
