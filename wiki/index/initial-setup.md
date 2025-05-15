@@ -45,7 +45,8 @@ Navigate to the **Admin Panel** in OpenWebUI to configure the settings as follow
 - **Search Result Count**: Set to `2`. This limits the number of search results returned to 2.
 - **Concurrent Requests**: Set to `2`. This allows up to 2 concurrent web search requests.
 - **Bypass Embedding and Retrieval**: Set to `On`. This skips embedding and retrieval steps for web search results, directly using raw search data.
-- **Bypass SSL Verification for Websites**: Set to `On`. This disables SSL verification for web search requests, useful for testing but should be re-evaluated for production.
+- **Web Loader Engine**: Set to `playwright`. This changes the default Web Loader Enginer used by Open WebUI to playwright and it's mandatory to assist in file document detection as we have detected in our tests, as Open WebUI checks the value `WEB_LOADER_ENGINE` to run this command `python -c "import nltk; nltk.download('punkt_tab')"`.
+- **Playwright WebSocket URL**: Set to `ws://localhost:3000`. This value should match the websocket port configured in the AKS deployment as well. 
 
 ### Code Execution Tab
 
@@ -66,7 +67,7 @@ Navigate to the **Admin Panel** in OpenWebUI to configure the settings as follow
 ### Documents Tab
 
 - **Content Extraction Engine**: Select `Tika` from the dropdown.
-  - Verify that the URL matches the environment variable `TIKA_SERVER_ENDPOINT`, which should be `http://tika:9998`.
+  - Verify that the URL matches the environment variable `TIKA_SERVER_ENDPOINT`, which should be `http://localhost:9998`.
 - **Bypass Embedding and Retrieval**: Ensure this is `Not Active`. This ensures embeddings are generated for document content.
 - **Text Splitter**: Select `Tiktoken`. This uses the Tiktoken library for text splitting.
 - **Chunk Size**: Set to `1000`. This defines the size of text chunks for processing.
@@ -79,7 +80,8 @@ Navigate to the **Admin Panel** in OpenWebUI to configure the settings as follow
   - **Top K Reranker**: Set to `10`. This reranks the top 10 results for better relevance.
   - **Minimum Score**: Set to `0`. This includes all results regardless of score.
 - **RAG Template**: Replace the default RAG template with the one from the DevOps repository at `/Custom_Functions/RAG_Custom_Prompt.txt`.
-- **Files Max Upload Size and Count**: Set to `5`. This limits the maximum number of files that can be uploaded at once to 5.
+- **Files Max Upload Size**: Set to `5`. This limits the maximum size of files that can be uploaded to 5 MB per file.
+- **Files Max Upload Count**: Set to `20`. This limits the maximum number of files that can be uploaded at once to 20.
 
 ### Models Tab
 

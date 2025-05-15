@@ -14,29 +14,68 @@ services:
       args:
         OLLAMA_BASE_URL: '/ollama'
       dockerfile: Dockerfile
-    image: open-webui:v0.5.2
-    # Uncomment if you prefer a pre-built image instead of building locally
-    # image: ghcr.io/open-webui/open-webui:${WEBUI_DOCKER_TAG-main}
+    image: lagoon-open-webui:v0.5.4
     container_name: open-webui
     volumes:
       - open-webui:/app/backend/data
+      - jupyter-data:/sandbox/persistent
     depends_on:
       - ollama
       - qdrant
+      - docling
+      - playwright
+      - jupyter
     ports:
       - ${OPEN_WEBUI_PORT-3000}:8080
     env_file:
       - .env
-    environment:
-      - OLLAMA_BASE_URL=http://ollama:11434
-      - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY}
     extra_hosts:
       - host.docker.internal:host-gateway
-      - api-dev.tikehaucapital.com:192.168.10.53  # Direct IP mapping as fallback
+      - api-dev.tikehaucapital.com:192.168.10.53
     dns:
-      - 192.168.10.10  # Your local DNS server for internal resolution
-      - 8.8.8.8       # Fallback to Google DNS
+      - 192.168.10.10
+      - 8.8.8.8
+    command: >
+      bash -c "chown -R 0:0 /app/backend/data && \
+               groupadd -g 1000 sharedgroup || true && \
+               chgrp -R sharedgroup /sandbox/persistent && \
+               chmod -R g+w /sandbox/persistent && \
+               bash /app/backend/start.sh"
     restart: unless-stopped
+
+  jupyter:
+    build:
+      context: .
+      dockerfile: Dockerfile-jupyter
+    image: custom-jupyter:python-3.11
+    container_name: jupyter
+    volumes:
+      - jupyter-data:/sandbox/persistent
+    ports:
+      - 8888:8888
+    environment:
+      - JUPYTER_ENABLE_LAB=yes
+      - JUPYTER_TOKEN=${CODE_EXECUTION_JUPYTER_AUTH_TOKEN}
+      - NB_UID=1000
+      - NB_GID=100
+      - CHOWN_HOME=yes
+      - CHOWN_HOME_OPTS=-R
+      - CHOWN_EXTRA=/sandbox/persistent
+      - CHOWN_EXTRA_OPTS=-R
+      - NB_DIR=/sandbox/persistent
+      - JUPYTER_LOG_LEVEL=DEBUG
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2g
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:8888/jupyter/api?token=${CODE_EXECUTION_JUPYTER_AUTH_TOKEN} > /dev/null"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
   qdrant:
     image: qdrant/qdrant
@@ -55,24 +94,45 @@ services:
       - .env
     command: "http open-webui:8080 --domain=${NGROK_DOMAIN}"
     ports:
-      - "4040:4040"  # Optional: Expose ngrok dashboard
+      - "4040:4040"
     depends_on:
       - open-webui
     restart: unless-stopped
 
   tika:
-    image: apache/tika:${TIKA_VERSION-2.9.1.0}  # Reference version from .env
+    image: apache/tika:${TIKA_VERSION-2.9.1.0}
     container_name: tika
     restart: unless-stopped
     ports:
-      - ${TIKA_PORT-9998}:9998  # Reference port from .env
+      - ${TIKA_PORT-9998}:9998
     healthcheck:
-      test: ["CMD", "curl", "-f", "${TIKA_SERVER_ENDPOINT}/tika"]  # Use .env variable
-      interval: ${TIKA_HEALTHCHECK_INTERVAL-30s}
+      test: ["CMD", "curl", "-f", "${TIKA_SERVER_ENDPOINT}/tika"]
+      interval: ${TIKA_HEALTHCHECK_INTERVAL-60s}
       timeout: ${TIKA_HEALTHCHECK_TIMEOUT-10s}
       retries: ${TIKA_HEALTHCHECK_RETRIES-3}
+
+  docling:
+    image: quay.io/docling-project/docling-serve:${DOCLING_VERSION-latest}
+    container_name: docling
+    restart: unless-stopped
+    ports:
+      - ${DOCLING_PORT-5001}:5001
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD", "curl", "-f", "${DOCLING_SERVER_ENDPOINT}/health"]
+      interval: ${DOCLING_HEALTHCHECK_INTERVAL-60s}
+      timeout: ${DOCLING_HEALTHCHECK_TIMEOUT-10s}
+      retries: ${DOCLING_HEALTHCHECK_RETRIES-3}
+
+  playwright:
+    image: mcr.microsoft.com/playwright:v1.49.1-noble
+    container_name: playwright
+    command: npx -y playwright@1.49.1 run-server --port 3000 --host 0.0.0.0
+    restart: unless-stopped
 
 volumes:
   ollama: {}
   open-webui: {}
   qdrant_data: {}
+  jupyter-data: {}
