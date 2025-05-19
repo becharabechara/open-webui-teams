@@ -78,12 +78,12 @@ Pay close attention to the authentication logic in `backend/open_webui/main.py`,
 Before committing changes, build and test the updated image locally to ensure compatibility with your customizations.
 
 1. **Determine the New Version Tag**:
-   - The current latest version of OpenWebUI is `v0.5.2`. For this update, use `v0.5.3` as the new version tag.
+   - The current latest version of OpenWebUI is `v0.5.5`. For this update, use `v0.5.6` as the new version tag.
 
 2. **Build the Docker Image**:
    - In your project directory, build the Docker image with the new version tag and also tag it as `latest`:
      ```
-     docker build -t open-webui:v0.5.3 -t open-webui:latest .
+     docker build -t lagoon-open-webui:v0.5.5 -t lagoon-open-webui:latest .
      ```
 
 3. **Test with Local Docker Compose**:
@@ -91,7 +91,7 @@ Before committing changes, build and test the updated image locally to ensure co
      ```yaml
      services:
        open-webui:
-         image: open-webui:v0.5.3
+         image: lagoon-open-webui:v0.5.6
          # ... other configurations ...
      ```
    - Start the services using Docker Compose (Ngrok is already configured in your `docker-compose.yaml`):
@@ -121,7 +121,7 @@ Before committing changes, build and test the updated image locally to ensure co
      ```yaml
      services:
        open-webui:
-         image: open-webui:v0.5.3
+         image: lagoon-open-webui:v0.5.6
          # ... other configurations ...
      ```
 
@@ -141,7 +141,7 @@ Before committing changes, build and test the updated image locally to ensure co
      ```
    - Commit the changes with a descriptive message:
      ```
-     git commit -m "Update OpenWebUI to v0.5.3 with upstream changes"
+     git commit -m "Update OpenWebUI to v0.5.6 with upstream changes"
      ```
 
 2. **Push to Azure DevOps**:
@@ -165,7 +165,7 @@ Before committing changes, build and test the updated image locally to ensure co
 
 ## Step 8: Deploy to Production via Azure DevOps Pipelines
 
-- **Note on Docker Push**: You do not need to manually push the Docker image to Azure Container Registry (ACR). Azure DevOps pipelines are configured to handle the build and push of the `open-webui:v0.5.3` and `open-webui:latest` images to ACR as part of the deployment process.
+- **Note on Docker Push**: You do not need to manually push the Docker image to Azure Container Registry (ACR). Azure DevOps pipelines are configured to handle the build and push of the `lagoon-open-webui:v0.5.6` and `lagoon-open-webui:latest` images to ACR as part of the deployment process.
 - After pushing the changes to Azure DevOps, trigger your deployment pipeline to build and deploy the updated image to your production environment.
 - Monitor the deployment for any issues and roll back if necessary.
 
