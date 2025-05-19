@@ -18,7 +18,7 @@ services:
     container_name: open-webui
     volumes:
       - open-webui:/app/backend/data
-      - jupyter-data:/sandbox/persistent
+      - jupyter-data:/jupyter-files
     depends_on:
       - ollama
       - qdrant
@@ -38,8 +38,8 @@ services:
     command: >
       bash -c "chown -R 0:0 /app/backend/data && \
                groupadd -g 1000 sharedgroup || true && \
-               chgrp -R sharedgroup /sandbox/persistent && \
-               chmod -R g+w /sandbox/persistent && \
+               chgrp -R sharedgroup /jupyter-files && \
+               chmod -R g+w /jupyter-files && \
                bash /app/backend/start.sh"
     restart: unless-stopped
 
@@ -50,7 +50,7 @@ services:
     image: custom-jupyter:python-3.11
     container_name: jupyter
     volumes:
-      - jupyter-data:/sandbox/persistent
+      - jupyter-data:/jupyter-files
     ports:
       - 8888:8888
     environment:
@@ -60,9 +60,9 @@ services:
       - NB_GID=100
       - CHOWN_HOME=yes
       - CHOWN_HOME_OPTS=-R
-      - CHOWN_EXTRA=/sandbox/persistent
+      - CHOWN_EXTRA=/jupyter-files
       - CHOWN_EXTRA_OPTS=-R
-      - NB_DIR=/sandbox/persistent
+      - NB_DIR=/jupyter-files
       - JUPYTER_LOG_LEVEL=DEBUG
     restart: unless-stopped
     deploy:
