@@ -14,11 +14,11 @@ services:
       args:
         OLLAMA_BASE_URL: '/ollama'
       dockerfile: Dockerfile
-    image: lagoon-open-webui:v0.5.4
+    image: lagoon-open-webui:v0.5.5
     container_name: open-webui
     volumes:
       - open-webui:/app/backend/data
-      - jupyter-data:/sandbox/persistent
+      - jupyter-data:/jupyter-files
     depends_on:
       - ollama
       - qdrant
@@ -38,8 +38,8 @@ services:
     command: >
       bash -c "chown -R 0:0 /app/backend/data && \
                groupadd -g 1000 sharedgroup || true && \
-               chgrp -R sharedgroup /sandbox/persistent && \
-               chmod -R g+w /sandbox/persistent && \
+               chgrp -R sharedgroup /jupyter-files && \
+               chmod -R g+w /jupyter-files && \
                bash /app/backend/start.sh"
     restart: unless-stopped
 
@@ -50,7 +50,7 @@ services:
     image: custom-jupyter:python-3.11
     container_name: jupyter
     volumes:
-      - jupyter-data:/sandbox/persistent
+      - jupyter-data:/jupyter-files
     ports:
       - 8888:8888
     environment:
@@ -60,9 +60,9 @@ services:
       - NB_GID=100
       - CHOWN_HOME=yes
       - CHOWN_HOME_OPTS=-R
-      - CHOWN_EXTRA=/sandbox/persistent
+      - CHOWN_EXTRA=/jupyter-files
       - CHOWN_EXTRA_OPTS=-R
-      - NB_DIR=/sandbox/persistent
+      - NB_DIR=/jupyter-files
       - JUPYTER_LOG_LEVEL=DEBUG
     restart: unless-stopped
     deploy:
@@ -86,18 +86,6 @@ services:
       - "6334:6334"
     volumes:
       - qdrant_data:/qdrant/storage
-
-  ngrok:
-    image: ngrok/ngrok:latest
-    container_name: ngrok
-    env_file:
-      - .env
-    command: "http open-webui:8080 --domain=${NGROK_DOMAIN}"
-    ports:
-      - "4040:4040"
-    depends_on:
-      - open-webui
-    restart: unless-stopped
 
   tika:
     image: apache/tika:${TIKA_VERSION-2.9.1.0}
@@ -129,6 +117,18 @@ services:
     image: mcr.microsoft.com/playwright:v1.49.1-noble
     container_name: playwright
     command: npx -y playwright@1.49.1 run-server --port 3000 --host 0.0.0.0
+    restart: unless-stopped
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared
+    command: tunnel --config /etc/cloudflared/cloudflared-config.yaml run openwebui-tunnel
+    volumes:
+      - ./cloudflared/cloudflared-config.yaml:/etc/cloudflared/cloudflared-config.yaml
+      - ./cloudflared/tunnel-credentials.json:/etc/cloudflared/tunnel-credentials.json
+      - ./cloudflared/cert.pem:/etc/cloudflared/cert.pem
+    depends_on:
+      - open-webui
     restart: unless-stopped
 
 volumes:
