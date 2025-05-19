@@ -1594,6 +1594,8 @@ async def healthcheck_with_db():
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 app.mount("/cache", StaticFiles(directory=CACHE_DIR), name="cache")
 
+# Adding Mounts for Jupyter Notebook Static files
+app.mount("/jupyter-files", StaticFiles(directory="/jupyter-files"), name="jupyter-files")
 
 def swagger_ui_html(*args, **kwargs):
     return get_swagger_ui_html(
