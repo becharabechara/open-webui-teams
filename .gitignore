@@ -310,3 +310,4 @@ cypress/screenshots
 webui.db
 rating_distribution.png
 feedback_analysis.csv
+cloudflared

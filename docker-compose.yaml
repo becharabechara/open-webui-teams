@@ -14,7 +14,7 @@ services:
       args:
         OLLAMA_BASE_URL: '/ollama'
       dockerfile: Dockerfile
-    image: lagoon-open-webui:v0.5.4
+    image: lagoon-open-webui:v0.5.5
     container_name: open-webui
     volumes:
       - open-webui:/app/backend/data
@@ -87,18 +87,6 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
 
-  ngrok:
-    image: ngrok/ngrok:latest
-    container_name: ngrok
-    env_file:
-      - .env
-    command: "http open-webui:8080 --domain=${NGROK_DOMAIN}"
-    ports:
-      - "4040:4040"
-    depends_on:
-      - open-webui
-    restart: unless-stopped
-
   tika:
     image: apache/tika:${TIKA_VERSION-2.9.1.0}
     container_name: tika
@@ -129,6 +117,18 @@ services:
     image: mcr.microsoft.com/playwright:v1.49.1-noble
     container_name: playwright
     command: npx -y playwright@1.49.1 run-server --port 3000 --host 0.0.0.0
+    restart: unless-stopped
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared
+    command: tunnel --config /etc/cloudflared/cloudflared-config.yaml run openwebui-tunnel
+    volumes:
+      - ./cloudflared/cloudflared-config.yaml:/etc/cloudflared/cloudflared-config.yaml
+      - ./cloudflared/tunnel-credentials.json:/etc/cloudflared/tunnel-credentials.json
+      - ./cloudflared/cert.pem:/etc/cloudflared/cert.pem
+    depends_on:
+      - open-webui
     restart: unless-stopped
 
 volumes:
