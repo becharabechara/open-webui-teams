@@ -100,7 +100,10 @@ services:
       retries: ${TIKA_HEALTHCHECK_RETRIES-3}
 
   docling:
-    image: quay.io/docling-project/docling-serve:${DOCLING_VERSION-latest}
+    build:
+      context: .
+      dockerfile: Dockerfile-docling
+    image: custom-docling:latest
     container_name: docling
     restart: unless-stopped
     ports:
@@ -112,6 +115,11 @@ services:
       interval: ${DOCLING_HEALTHCHECK_INTERVAL-60s}
       timeout: ${DOCLING_HEALTHCHECK_TIMEOUT-10s}
       retries: ${DOCLING_HEALTHCHECK_RETRIES-3}
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4g
 
   playwright:
     image: mcr.microsoft.com/playwright:v1.49.1-noble
@@ -122,14 +130,12 @@ services:
   cloudflared:
     image: cloudflare/cloudflared:latest
     container_name: cloudflared
-    command: tunnel --config /etc/cloudflared/cloudflared-config.yaml run openwebui-tunnel
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --protocol http2 --config /etc/cloudflared/cloudflared-config.yaml run openwebui-tunnel
     volumes:
-      - ./cloudflared/cloudflared-config.yaml:/etc/cloudflared/cloudflared-config.yaml
-      - ./cloudflared/tunnel-credentials.json:/etc/cloudflared/tunnel-credentials.json
-      - ./cloudflared/cert.pem:/etc/cloudflared/cert.pem
+      - ./cloudflared:/etc/cloudflared
     depends_on:
       - open-webui
-    restart: unless-stopped
 
 volumes:
   ollama: {}
