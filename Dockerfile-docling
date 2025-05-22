@@ -1,0 +1,21 @@
+FROM quay.io/docling-project/docling-serve:latest
+
+# Switch to root user to create directory and download files
+USER root
+
+# Create the /usr/share/tesseract/tessdata directory to match TESSDATA_PREFIX
+RUN mkdir -p /usr/share/tesseract/tessdata && \
+    # Download Tesseract language data files from the official Tesseract GitHub repository
+    curl -L -o /usr/share/tesseract/tessdata/eng.traineddata https://github.com/tesseract-ocr/tessdata/raw/main/eng.traineddata && \
+    curl -L -o /usr/share/tesseract/tessdata/fra.traineddata https://github.com/tesseract-ocr/tessdata/raw/main/fra.traineddata && \
+    curl -L -o /usr/share/tesseract/tessdata/deu.traineddata https://github.com/tesseract-ocr/tessdata/raw/main/deu.traineddata && \
+    curl -L -o /usr/share/tesseract/tessdata/spa.traineddata https://github.com/tesseract-ocr/tessdata/raw/main/spa.traineddata && \
+    curl -L -o /usr/share/tesseract/tessdata/jpn.traineddata https://github.com/tesseract-ocr/tessdata/raw/main/jpn.traineddata && \
+    # Set permissions to ensure accessibility
+    chmod -R 755 /usr/share/tesseract/tessdata/
+
+# Set the working directory to match the base image
+WORKDIR /opt/app-root/src
+
+# Switch to the default non-root user (confirmed as 'default')
+USER default
