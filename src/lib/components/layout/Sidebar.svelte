@@ -53,6 +53,7 @@
 	import Plus from '../icons/Plus.svelte';
 	import Tooltip from '../common/Tooltip.svelte';
 	import Folders from './Sidebar/Folders.svelte';
+	import OpenWebUILink from '../OpenWebUILink.svelte';
 	import { getChannels, createNewChannel } from '$lib/apis/channels';
 	import ChannelModal from './Sidebar/ChannelModal.svelte';
 	import ChannelItem from './Sidebar/ChannelItem.svelte';
@@ -911,7 +912,7 @@
 		</div>
 
 		<div class="px-2">
-			<div class="flex flex-col font-primary">
+			<div class="flex flex-col font-primary space-y-2">
 				{#if $user !== undefined && $user !== null}
 					<UserMenu
 						role={$user?.role}
@@ -938,6 +939,11 @@
 						</button>
 					</UserMenu>
 				{/if}
+
+				<!-- Add OpenWebUILink Below UserMenu, Aligned Left -->
+				<div class="border-t border-gray-200 dark:border-gray-700 pt-2 pl-2.5">
+					<OpenWebUILink />
+				</div>
 			</div>
 		</div>
 	</div>
