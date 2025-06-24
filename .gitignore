@@ -312,4 +312,4 @@ rating_distribution.png
 feedback_analysis.csv
 cloudflared
 webui.db.backup
-.open-webui-postgres-migration/
+.open-webui-postgres-migration
