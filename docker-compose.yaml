@@ -9,23 +9,23 @@ services:
     image: ollama/ollama:${OLLAMA_DOCKER_TAG-latest}
 
   postgres:
-      image: postgres:latest
-      container_name: postgres
-      environment:
-        - POSTGRES_USER=${POSTGRES_USER}
-        - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-        - POSTGRES_DB=${POSTGRES_DB}
-      volumes:
-        - postgres-data:/var/lib/postgresql/data
-      ports:
-        - "5432:5432"
-      restart: unless-stopped
-      dns:
-        - 192.168.10.10
-        - 8.8.8.8
-      extra_hosts:
-        - host.docker.internal:host-gateway
-        - api-dev.tikehaucapital.com:192.168.10.53
+    image: postgres:latest
+    container_name: postgres
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    dns:
+      - 192.168.10.10
+      - 8.8.8.8
+    extra_hosts:
+      - host.docker.internal:host-gateway
+      - api-dev.tikehaucapital.com:192.168.10.53
 
   open-webui:
     build:
@@ -60,6 +60,18 @@ services:
                chgrp -R sharedgroup /jupyter-files && \
                chmod -R g+w /jupyter-files && \
                bash /app/backend/start.sh"
+    restart: unless-stopped
+
+  maintenance:
+    build:
+      context: ./MaintenanceApp
+      dockerfile: Dockerfile
+    image: lagoon-maintenance:latest
+    container_name: maintenance
+    ports:
+      - "5000:5000"
+    env_file:
+      - ./MaintenanceApp/.env
     restart: unless-stopped
 
   jupyter:
