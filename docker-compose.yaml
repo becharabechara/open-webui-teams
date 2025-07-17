@@ -8,13 +8,32 @@ services:
     restart: unless-stopped
     image: ollama/ollama:${OLLAMA_DOCKER_TAG-latest}
 
+  postgres:
+    image: postgres:latest
+    container_name: postgres
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    dns:
+      - 192.168.10.10
+      - 8.8.8.8
+    extra_hosts:
+      - host.docker.internal:host-gateway
+      - api-dev.tikehaucapital.com:192.168.10.53
+
   open-webui:
     build:
       context: .
       args:
         OLLAMA_BASE_URL: '/ollama'
       dockerfile: Dockerfile
-    image: lagoon-open-webui:v0.5.9
+    image: lagoon-open-webui:v0.6.16
     container_name: open-webui
     volumes:
       - open-webui:/app/backend/data
@@ -23,8 +42,8 @@ services:
       - ollama
       - qdrant
       - docling
-      - playwright
       - jupyter
+      - postgres
     ports:
       - ${OPEN_WEBUI_PORT-3000}:8080
     env_file:
@@ -41,6 +60,18 @@ services:
                chgrp -R sharedgroup /jupyter-files && \
                chmod -R g+w /jupyter-files && \
                bash /app/backend/start.sh"
+    restart: unless-stopped
+
+  maintenance:
+    build:
+      context: ./MaintenanceApp
+      dockerfile: Dockerfile
+    image: lagoon-maintenance:latest
+    container_name: maintenance
+    ports:
+      - "5000:5000"
+    env_file:
+      - ./MaintenanceApp/.env
     restart: unless-stopped
 
   jupyter:
@@ -121,12 +152,6 @@ services:
           cpus: '2'
           memory: 4g
 
-  playwright:
-    image: mcr.microsoft.com/playwright:v1.49.1-noble
-    container_name: playwright
-    command: npx -y playwright@1.49.1 run-server --port 3000 --host 0.0.0.0
-    restart: unless-stopped
-
   cloudflared:
     image: cloudflare/cloudflared:latest
     container_name: cloudflared
@@ -142,3 +167,4 @@ volumes:
   open-webui: {}
   qdrant_data: {}
   jupyter-data: {}
+  postgres-data: {}
