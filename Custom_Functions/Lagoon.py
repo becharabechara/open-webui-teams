@@ -2,7 +2,7 @@
 title: Lagoon API Pipeline
 author: becharabechara
 author_url: https://github.com/bbechara-tikehaucapital
-version: 0.3.5
+version: 0.3.6
 license: MIT
 description: A pipeline for communicating with Lagoon API Exposed via Archipel
 features:
@@ -30,6 +30,8 @@ v0.3.4 - Moez:
   - Change from 150000 Character to 150000 Token
 v0.3.5 - Bechara:
   - Changed the tiktoken encoding formatter
+v0.3.6 - Bechara:
+  - Added escaping path and message content from within the content to conflicts
 """
 
 from typing import Union, AsyncGenerator, Dict, Any, Optional, List
@@ -78,7 +80,7 @@ class UserValves(BaseModel):
         description="Whether to verify the Lagoon API server certificate",
     )
     lagoon_max_tokens: int = Field(
-        default=int(os.getenv("LAGOON_MAX_TOKENS", "150000")),  # Convert to int
+        default=int(os.getenv("LAGOON_MAX_TOKENS", "150000")),
         description="Maximum number of tokens for document content",
     )
 
@@ -132,7 +134,7 @@ class Pipe:
                 return
 
             # Extract WebSearchActivated from __metadata__['features']['web_search']
-            web_search_activated = False  # Default value
+            web_search_activated = False
             if __metadata__ and "features" in __metadata__:
                 web_search_activated = __metadata__["features"].get("web_search", False)
 
@@ -148,6 +150,15 @@ class Pipe:
                     __event_emitter__,
                     __task__,
                 )
+                if not result:
+                    logger.warning(
+                        f"Empty response from Lagoon API for task {__task__}"
+                    )
+                    yield {
+                        "content": f"No response received from Lagoon API for task {__task__}.",
+                        "citations": [],
+                    }
+                    return
                 yield result
                 return
 
@@ -223,42 +234,45 @@ class Pipe:
 
     def _prepare_history(self, messages, files):
         """Extract and format message history."""
-
-        # Get the tiktoken encoding from an environment variable, default to 'cl100k_base'
-        encoding_name = os.getenv("TIKTOKEN_ENCODING_NAME", "cl100k_base")
-
-        # Documents, if only one document, get all file content if token count <= lagoon_max_tokens
+        # Documents: If only one document, include full content if token count <= lagoon_max_tokens
         if files and len(files) == 1:
             file_data = files[0]["file"]["data"]
             content = file_data.get("content", "")
 
-            # Use tiktoken to count tokens
+            # Use tiktoken to count tokens with a valid encoding
             token_count = 0
             try:
-                encoding = tiktoken.get_encoding(encoding_name)
+                encoding = tiktoken.get_encoding("cl100k_base")
                 token_count = len(encoding.encode(content))
             except Exception as e:
-                logger.error(
-                    f"Error counting tokens with tiktoken encoding '{encoding_name}': {str(e)}"
-                )
+                logger.error(f"Error counting tokens with tiktoken: {str(e)}")
                 token_count = len(content) // 4  # Fallback to character-based estimate
 
-            if token_count <= self.valves.lagoon_max_tokens:
+            # Ensure lagoon_max_tokens is an integer
+            max_tokens = int(self.valves.lagoon_max_tokens)
+
+            if token_count <= max_tokens:
                 # Find system message
                 for message in messages:
                     if message.get("role") == "system":
                         system_message = message.get("content", "")
 
-                        # Replace message context, <context/>
-                        new_system_message = re.sub(
-                            r"<context>(.*?)</context>",
-                            f"<context>\n{content}\n</context>",
-                            system_message,
-                            flags=re.DOTALL,
-                        )
+                        # Escape backslashes in content to prevent invalid escape sequences
+                        escaped_content = content.replace("\\", "\\\\")
 
-                        # Update system message
-                        message["content"] = new_system_message
+                        # Replace message context, <context/>
+                        try:
+                            new_system_message = re.sub(
+                                r"<context>(.*?)</context>",
+                                f"<context>\n{escaped_content}\n</context>",
+                                system_message,
+                                flags=re.DOTALL,
+                            )
+                            message["content"] = new_system_message
+                        except Exception as e:
+                            logger.error(f"Error in re.sub: {str(e)}")
+                            raise  # Re-raise to be caught by the caller
+
                         break
 
         return [
@@ -273,15 +287,13 @@ class Pipe:
         self, user_email, history, web_search_activated, event_emitter, task
     ):
         """Process internal tasks (title/tags generation)."""
-
         if task == "query_generation":
             if event_emitter:
-                # 1. Affiche le message
                 await event_emitter(
                     {
                         "type": "message",
                         "data": {
-                            "content": f"📚 **Document Mode**\n\n",
+                            "content": f"📚 **Document Mode**",
                             "citations": [],
                         },
                     }
@@ -305,15 +317,19 @@ class Pipe:
                 )
 
             response.raise_for_status()
-            return response.text
-        except Exception:
+            response_text = response.text
+            if not response_text:
+                logger.warning(f"Empty response from Lagoon API for task {task}")
+                return ""
+            return response_text
+        except Exception as e:
+            logger.error(f"Error in process_task: {str(e)}")
             return ""
 
     async def _stream_api_response(
         self, user_email, history, web_search_activated, __event_emitter__
     ):
         """Stream the API response to the client."""
-        # Prepare payload and headers
         payload = {
             "User": user_email,
             "Messages": history,
@@ -324,12 +340,10 @@ class Pipe:
             "Content-Type": "application/json; charset=utf-8",
         }
 
-        # Add API key if needed
         if self.valves.lagoon_needs_api_key:
             api_key = self.valves.lagoon_api_key
             headers["Authorization"] = f"Bearer {api_key}"
 
-        # Make API call
         async with httpx.AsyncClient(
             verify=self.valves.lagoon_server_certificate, timeout=120
         ) as client:
@@ -342,23 +356,21 @@ class Pipe:
                 response.raise_for_status()
 
                 first_chunk_received = False
+                response_text = ""
                 async for chunk in response.aiter_text():
                     if chunk:
-                        # API Notifications
+                        response_text += chunk
                         jsonblock = chunk.strip()
                         if jsonblock.startswith("{") and jsonblock.endswith("}"):
                             try:
                                 obj = json.loads(jsonblock)
                                 obj_type = obj.get("type")
-
-                                # Notification types (citation, status, replace)
                                 if obj_type in {"citation", "status"}:
                                     await __event_emitter__(obj)
                                     continue
                             except json.JSONDecodeError:
                                 pass
 
-                        # Update Status, Answering
                         if not first_chunk_received:
                             first_chunk_received = True
                             await __event_emitter__(
@@ -371,11 +383,16 @@ class Pipe:
                                 }
                             )
 
-                        # Send chunk in real-time to Open Web UI
                         yield chunk
 
-                        # For smooth streaming
-                        # await asyncio.sleep(0.02)
+                if not response_text:
+                    logger.warning(
+                        "Empty response from Lagoon API in stream_api_response"
+                    )
+                    yield {
+                        "content": "No response received from Lagoon API.",
+                        "citations": [],
+                    }
 
     async def _handle_error(self, exception, error_type, __event_emitter__):
         """Handle and format errors."""
