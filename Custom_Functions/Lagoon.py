@@ -293,7 +293,7 @@ class Pipe:
                     {
                         "type": "message",
                         "data": {
-                            "content": f"📚 **Document Mode**",
+                            "content": f"📚 **Document Mode**\n\n",
                             "citations": [],
                         },
                     }
