@@ -7,6 +7,13 @@ services:
     tty: true
     restart: unless-stopped
     image: ollama/ollama:${OLLAMA_DOCKER_TAG-latest}
+    ports:
+      - "11434:11434"
+    environment:
+      - OLLAMA_LOG_LEVEL=${OLLAMA_LOG_LEVEL}
+      - OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL}
+      - OLLAMA_MAX_LOADED_MODELS=${OLLAMA_MAX_LOADED_MODELS}
+      - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE}
 
   postgres:
     image: postgres:latest
@@ -33,7 +40,7 @@ services:
       args:
         OLLAMA_BASE_URL: '/ollama'
       dockerfile: Dockerfile
-    image: lagoon-open-webui:v0.6.18
+    image: lagoon-open-webui:v0.6.22
     container_name: open-webui
     volumes:
       - open-webui:/app/backend/data
@@ -48,6 +55,8 @@ services:
       - ${OPEN_WEBUI_PORT-3000}:8080
     env_file:
       - .env
+    environment:
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL-http://ollama:11434}
     extra_hosts:
       - host.docker.internal:host-gateway
       - api-dev.tikehaucapital.com:192.168.10.53
