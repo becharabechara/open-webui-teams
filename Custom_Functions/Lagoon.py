@@ -2,7 +2,7 @@
 title: Lagoon API Pipeline
 author: becharabechara
 author_url: https://github.com/bbechara-tikehaucapital
-version: 0.3.6
+version: 0.3.7
 license: MIT
 description: A pipeline for communicating with Lagoon API Exposed via Archipel
 features:
@@ -32,6 +32,9 @@ v0.3.5 - Bechara:
   - Changed the tiktoken encoding formatter
 v0.3.6 - Bechara:
   - Added escaping path and message content from within the content to conflicts
+v0.3.7 - Bechara:
+  - Always include full file content with metadata in document mode
+  - Removed token limit conditions for file processing
 """
 
 from typing import Union, AsyncGenerator, Dict, Any, Optional, List
@@ -78,10 +81,6 @@ class UserValves(BaseModel):
     lagoon_server_certificate: bool = Field(
         default=os.getenv("LAGOON_SERVER_CERTIFICATE", "false").lower() == "true",
         description="Whether to verify the Lagoon API server certificate",
-    )
-    lagoon_max_tokens: int = Field(
-        default=int(os.getenv("LAGOON_MAX_TOKENS", "150000")),
-        description="Maximum number of tokens for document content",
     )
 
 
@@ -233,47 +232,10 @@ class Pipe:
         return user_email
 
     def _prepare_history(self, messages, files):
-        """Extract and format message history."""
-        # Documents: If only one document, include full content if token count <= lagoon_max_tokens
-        if files and len(files) == 1:
-            file_data = files[0]["file"]["data"]
-            content = file_data.get("content", "")
-
-            # Use tiktoken to count tokens with a valid encoding
-            token_count = 0
-            try:
-                encoding = tiktoken.get_encoding("cl100k_base")
-                token_count = len(encoding.encode(content))
-            except Exception as e:
-                logger.error(f"Error counting tokens with tiktoken: {str(e)}")
-                token_count = len(content) // 4  # Fallback to character-based estimate
-
-            # Ensure lagoon_max_tokens is an integer
-            max_tokens = int(self.valves.lagoon_max_tokens)
-
-            if token_count <= max_tokens:
-                # Find system message
-                for message in messages:
-                    if message.get("role") == "system":
-                        system_message = message.get("content", "")
-
-                        # Escape backslashes in content to prevent invalid escape sequences
-                        escaped_content = content.replace("\\", "\\\\")
-
-                        # Replace message context, <context/>
-                        try:
-                            new_system_message = re.sub(
-                                r"<context>(.*?)</context>",
-                                f"<context>\n{escaped_content}\n</context>",
-                                system_message,
-                                flags=re.DOTALL,
-                            )
-                            message["content"] = new_system_message
-                        except Exception as e:
-                            logger.error(f"Error in re.sub: {str(e)}")
-                            raise  # Re-raise to be caught by the caller
-
-                        break
+        """Extract and format message history with full file content and metadata."""
+        # Process files if present - always include full content with metadata
+        if files:
+            self._inject_file_content_into_context(messages, files)
 
         return [
             {
@@ -282,6 +244,98 @@ class Pipe:
             }
             for msg in messages
         ]
+
+    def _inject_file_content_into_context(self, messages, files):
+        """Inject file content with metadata into system message context."""
+        try:
+            # Build comprehensive file content with metadata
+            file_contexts = []
+
+            for file_info in files:
+                # Extract file information from OpenWebUI structure
+                file_obj = file_info.get("file", {})
+                file_data = file_obj.get("data", {})
+                file_meta = file_obj.get("meta", {})
+                
+                # Get content from data section
+                content = file_data.get("content", "")
+                
+                # Get metadata from multiple possible locations
+                filename = (
+                    file_obj.get("filename") or 
+                    file_meta.get("name") or 
+                    file_info.get("name") or 
+                    "Unknown File"
+                )
+                
+                file_type = (
+                    file_meta.get("content_type") or 
+                    file_obj.get("content_type") or 
+                    "Unknown Type"
+                )
+                
+                file_size = (
+                    file_meta.get("size") or 
+                    file_obj.get("size") or 
+                    file_info.get("size") or 
+                    "Unknown Size"
+                )
+
+                # Create structured file context with metadata
+                file_context = self._format_file_context(
+                    filename, file_type, file_size, content
+                )
+                file_contexts.append(file_context)
+
+            # Combine all file contexts
+            combined_context = "\n\n".join(file_contexts)
+
+            # Find and update system message
+            for message in messages:
+                if message.get("role") == "system":
+                    system_message = message.get("content", "")
+
+                    # Escape content to prevent regex issues
+                    escaped_content = self._escape_content(combined_context)
+
+                    # Replace or add context
+                    updated_message = self._update_system_message_context(
+                        system_message, escaped_content
+                    )
+                    message["content"] = updated_message
+                    break
+
+        except Exception as e:
+            logger.error(f"Error injecting file content: {str(e)}")
+            raise
+
+    def _format_file_context(self, filename, file_type, file_size, content):
+        """Format individual file content with metadata."""
+        return f"""--- FILE: {filename} ---
+Type: {file_type}
+Size: {file_size}
+Content:
+{content}
+--- END FILE: {filename} ---"""
+
+    def _escape_content(self, content):
+        """Escape content to prevent regex conflicts."""
+        return content.replace("\\", "\\\\").replace("$", "\\$")
+
+    def _update_system_message_context(self, system_message, escaped_content):
+        """Update system message with new context content."""
+        # Check if context tags exist
+        if "<context>" in system_message and "</context>" in system_message:
+            # Replace existing context
+            return re.sub(
+                r"<context>(.*?)</context>",
+                f"<context>\n{escaped_content}\n</context>",
+                system_message,
+                flags=re.DOTALL,
+            )
+        else:
+            # Add context at the end of system message
+            return f"{system_message}\n\n<context>\n{escaped_content}\n</context>"
 
     async def _process_task(
         self, user_email, history, web_search_activated, event_emitter, task
