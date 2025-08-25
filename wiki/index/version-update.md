@@ -42,7 +42,7 @@ This section outlines the procedure to update the OpenWebUI image by pulling the
 3. **Merge the Upstream Changes**:
    - Merge the `main` branch from `upstream` into your `dev` branch:
      ```
-     git merge upstream/main
+     git merge --no-commit --no-ff upstream/main
      ```
    - If there are no conflicts, the merge will complete automatically. If conflicts arise, resolve them manually using your preferred Git tool (e.g., VS Code, `git mergetool`).
    - **Note on `git add`**: The `git merge` command does not automatically stage changes. If there were merge conflicts that you resolved, you must stage the resolved files using:
