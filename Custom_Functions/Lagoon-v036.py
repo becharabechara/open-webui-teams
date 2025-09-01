@@ -2,7 +2,7 @@
 title: Lagoon API Pipeline
 author: becharabechara
 author_url: https://github.com/bbechara-tikehaucapital
-version: 0.3.7
+version: 0.3.6
 license: MIT
 description: A pipeline for communicating with Lagoon API Exposed via Archipel
 features:
@@ -32,11 +32,6 @@ v0.3.5 - Bechara:
   - Changed the tiktoken encoding formatter
 v0.3.6 - Bechara:
   - Added escaping path and message content from within the content to conflicts
-v0.3.7 - Bechara:
-  - Restored production API endpoints
-  - Maintained v0.3.6 working behavior for file processing
-  - Simplified code structure and removed unused dependencies
-  - File content processing relies on OpenWebUI's built-in mechanism
 """
 
 from typing import Union, AsyncGenerator, Dict, Any, Optional, List
@@ -50,6 +45,7 @@ import logging
 import urllib3
 from fastapi import Request
 import re
+import tiktoken
 
 # Set up logging (minimal, errors only)
 logging.basicConfig(level=logging.INFO)
@@ -82,6 +78,10 @@ class UserValves(BaseModel):
     lagoon_server_certificate: bool = Field(
         default=os.getenv("LAGOON_SERVER_CERTIFICATE", "false").lower() == "true",
         description="Whether to verify the Lagoon API server certificate",
+    )
+    lagoon_max_tokens: int = Field(
+        default=int(os.getenv("LAGOON_MAX_TOKENS", "150000")),
+        description="Maximum number of tokens for document content",
     )
 
 
@@ -234,8 +234,47 @@ class Pipe:
 
     def _prepare_history(self, messages, files):
         """Extract and format message history."""
-        # Note: File content injection is handled by OpenWebUI itself
-        # This method simply formats the message history for the API
+        # Documents: If only one document, include full content if token count <= lagoon_max_tokens
+        if files and len(files) == 1 and False:
+            file_data = files[0]["file"]["data"]
+            content = file_data.get("content", "")
+
+            # Use tiktoken to count tokens with a valid encoding
+            token_count = 0
+            try:
+                encoding = tiktoken.get_encoding("cl100k_base")
+                token_count = len(encoding.encode(content))
+            except Exception as e:
+                logger.error(f"Error counting tokens with tiktoken: {str(e)}")
+                token_count = len(content) // 4  # Fallback to character-based estimate
+
+            # Ensure lagoon_max_tokens is an integer
+            max_tokens = int(self.valves.lagoon_max_tokens)
+
+            if token_count <= max_tokens:
+                # Find system message
+                for message in messages:
+                    if message.get("role") == "system":
+                        system_message = message.get("content", "")
+
+                        # Escape backslashes in content to prevent invalid escape sequences
+                        escaped_content = content.replace("\\", "\\\\")
+
+                        # Replace message context, <context/>
+                        try:
+                            new_system_message = re.sub(
+                                r"<context>(.*?)</context>",
+                                f"<context>\n{escaped_content}\n</context>",
+                                system_message,
+                                flags=re.DOTALL,
+                            )
+                            message["content"] = new_system_message
+                        except Exception as e:
+                            logger.error(f"Error in re.sub: {str(e)}")
+                            raise  # Re-raise to be caught by the caller
+
+                        break
+
         return [
             {
                 "content": msg.get("content", ""),
