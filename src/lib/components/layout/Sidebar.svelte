@@ -443,6 +443,8 @@
 
 		await tick();
 	};
+
+	const isWindows = /Windows/i.test(navigator.userAgent);
 </script>
 
 <ArchivedChatsModal
@@ -516,7 +518,7 @@
 		id="sidebar"
 	>
 		<button
-			class="flex flex-col flex-1 cursor-[e-resize]"
+			class="flex flex-col flex-1 {isWindows ? 'cursor-pointer' : 'cursor-[e-resize]'}"
 			on:click={async () => {
 				showSidebar.set(!$showSidebar);
 			}}
@@ -527,7 +529,10 @@
 					placement="right"
 				>
 					<button
-						class=" flex rounded-lg hover:bg-gray-100 dark:hover:bg-gray-850 transition group cursor-[e-resize]"
+						class="flex rounded-lg hover:bg-gray-100 dark:hover:bg-gray-850 transition group {isWindows
+							? 'cursor-pointer'
+							: 'cursor-[e-resize]'}"
+						aria-label={$showSidebar ? $i18n.t('Close Sidebar') : $i18n.t('Open Sidebar')}
 					>
 						<div class=" self-center flex items-center justify-center size-9">
 							<img
@@ -557,6 +562,7 @@
 								goto('/');
 								newChatHandler();
 							}}
+							aria-label={$i18n.t('New Chat')}
 						>
 							<div class=" self-center flex items-center justify-center size-9">
 								<PencilSquare className="size-4.5" />
@@ -576,6 +582,7 @@
 								showSearch.set(true);
 							}}
 							draggable="false"
+							aria-label={$i18n.t('Search')}
 						>
 							<div class=" self-center flex items-center justify-center size-9">
 								<Search className="size-4.5" />
@@ -598,6 +605,7 @@
 									itemClickHandler();
 								}}
 								draggable="false"
+								aria-label={$i18n.t('Notes')}
 							>
 								<div class=" self-center flex items-center justify-center size-9">
 									<Note className="size-4.5" />
@@ -620,6 +628,7 @@
 									goto('/workspace');
 									itemClickHandler();
 								}}
+								aria-label={$i18n.t('Workspace')}
 								draggable="false"
 							>
 								<div class=" self-center flex items-center justify-center size-9">
@@ -722,10 +731,13 @@
 					placement="bottom"
 				>
 					<button
-						class=" flex rounded-lg hover:bg-gray-100 dark:hover:bg-gray-850 transition cursor-[w-resize]"
+						class="flex rounded-lg hover:bg-gray-100 dark:hover:bg-gray-850 transition {isWindows
+							? 'cursor-pointer'
+							: 'cursor-[w-resize]'}"
 						on:click={() => {
 							showSidebar.set(!$showSidebar);
 						}}
+						aria-label={$showSidebar ? $i18n.t('Close Sidebar') : $i18n.t('Open Sidebar')}
 					>
 						<div class=" self-center p-1.5">
 							<Sidebar />
@@ -742,6 +754,7 @@
 						href="/"
 						draggable="false"
 						on:click={newChatHandler}
+						aria-label={$i18n.t('New Chat')}
 					>
 						<div class="self-center">
 							<PencilSquare className=" size-4.5" strokeWidth="2" />
@@ -760,6 +773,7 @@
 							showSearch.set(true);
 						}}
 						draggable="false"
+						aria-label={$i18n.t('Search')}
 					>
 						<div class="self-center">
 							<Search strokeWidth="2" className="size-4.5" />
@@ -778,6 +792,7 @@
 							href="/notes"
 							on:click={itemClickHandler}
 							draggable="false"
+							aria-label={$i18n.t('Notes')}
 						>
 							<div class="self-center">
 								<Note className="size-4.5" strokeWidth="2" />
@@ -797,6 +812,7 @@
 							href="/workspace"
 							on:click={itemClickHandler}
 							draggable="false"
+							aria-label={$i18n.t('Workspace')}
 						>
 							<div class="self-center">
 								<svg
