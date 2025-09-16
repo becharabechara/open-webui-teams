@@ -130,6 +130,7 @@ def get_headers_and_cookies(
 ):
     cookies = {}
     headers = {
+        "API-Version": AZURE_AI_API_VERSION,
         "Content-Type": "application/json",
         **(
             {
