@@ -40,7 +40,7 @@ services:
       args:
         OLLAMA_BASE_URL: '/ollama'
       dockerfile: Dockerfile
-    image: lagoon-open-webui:v0.6.26
+    image: lagoon-open-webui:v0.6.28
     container_name: open-webui
     volumes:
       - open-webui:/app/backend/data
