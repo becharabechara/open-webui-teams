@@ -33,8 +33,10 @@ v0.3.5 - Bechara:
 v0.3.6 - Bechara:
   - Added escaping path and message content from within the content to conflicts
 v0.3.7 - Bechara:
-  - Always include full file content with metadata in document mode
-  - Removed token limit conditions for file processing
+  - Restored production API endpoints
+  - Maintained v0.3.6 working behavior for file processing
+  - Simplified code structure and removed unused dependencies
+  - File content processing relies on OpenWebUI's built-in mechanism
 """
 
 from typing import Union, AsyncGenerator, Dict, Any, Optional, List
@@ -48,7 +50,6 @@ import logging
 import urllib3
 from fastapi import Request
 import re
-import tiktoken
 
 # Set up logging (minimal, errors only)
 logging.basicConfig(level=logging.INFO)
@@ -59,14 +60,14 @@ class UserValves(BaseModel):
     lagoon_api_taskendpoint: str = Field(
         default=os.getenv(
             "LAGOON_API_TASKENDPOINT",
-            "https://api-dev.tikehaucapital.com/lagoon/api/chatv2/taskopenwebui",
+            "https://api.tikehaucapital.com/lagoon/api/chatv2/taskopenwebui",
         ),
         description="Lagoon API endpoint",
     )
     lagoon_api_endpoint: str = Field(
         default=os.getenv(
             "LAGOON_API_ENDPOINT",
-            "https://api-dev.tikehaucapital.com/lagoon/api/chatv2/chatopenwebuistreaming",
+            "https://api.tikehaucapital.com/lagoon/api/chatv2/chatopenwebuistreaming",
         ),
         description="Lagoon API endpoint",
     )
@@ -232,11 +233,9 @@ class Pipe:
         return user_email
 
     def _prepare_history(self, messages, files):
-        """Extract and format message history with full file content and metadata."""
-        # Process files if present - always include full content with metadata
-        if files:
-            self._inject_file_content_into_context(messages, files)
-
+        """Extract and format message history."""
+        # Note: File content injection is handled by OpenWebUI itself
+        # This method simply formats the message history for the API
         return [
             {
                 "content": msg.get("content", ""),
@@ -244,98 +243,6 @@ class Pipe:
             }
             for msg in messages
         ]
-
-    def _inject_file_content_into_context(self, messages, files):
-        """Inject file content with metadata into system message context."""
-        try:
-            # Build comprehensive file content with metadata
-            file_contexts = []
-
-            for file_info in files:
-                # Extract file information from OpenWebUI structure
-                file_obj = file_info.get("file", {})
-                file_data = file_obj.get("data", {})
-                file_meta = file_obj.get("meta", {})
-                
-                # Get content from data section
-                content = file_data.get("content", "")
-                
-                # Get metadata from multiple possible locations
-                filename = (
-                    file_obj.get("filename") or 
-                    file_meta.get("name") or 
-                    file_info.get("name") or 
-                    "Unknown File"
-                )
-                
-                file_type = (
-                    file_meta.get("content_type") or 
-                    file_obj.get("content_type") or 
-                    "Unknown Type"
-                )
-                
-                file_size = (
-                    file_meta.get("size") or 
-                    file_obj.get("size") or 
-                    file_info.get("size") or 
-                    "Unknown Size"
-                )
-
-                # Create structured file context with metadata
-                file_context = self._format_file_context(
-                    filename, file_type, file_size, content
-                )
-                file_contexts.append(file_context)
-
-            # Combine all file contexts
-            combined_context = "\n\n".join(file_contexts)
-
-            # Find and update system message
-            for message in messages:
-                if message.get("role") == "system":
-                    system_message = message.get("content", "")
-
-                    # Escape content to prevent regex issues
-                    escaped_content = self._escape_content(combined_context)
-
-                    # Replace or add context
-                    updated_message = self._update_system_message_context(
-                        system_message, escaped_content
-                    )
-                    message["content"] = updated_message
-                    break
-
-        except Exception as e:
-            logger.error(f"Error injecting file content: {str(e)}")
-            raise
-
-    def _format_file_context(self, filename, file_type, file_size, content):
-        """Format individual file content with metadata."""
-        return f"""--- FILE: {filename} ---
-Type: {file_type}
-Size: {file_size}
-Content:
-{content}
---- END FILE: {filename} ---"""
-
-    def _escape_content(self, content):
-        """Escape content to prevent regex conflicts."""
-        return content.replace("\\", "\\\\").replace("$", "\\$")
-
-    def _update_system_message_context(self, system_message, escaped_content):
-        """Update system message with new context content."""
-        # Check if context tags exist
-        if "<context>" in system_message and "</context>" in system_message:
-            # Replace existing context
-            return re.sub(
-                r"<context>(.*?)</context>",
-                f"<context>\n{escaped_content}\n</context>",
-                system_message,
-                flags=re.DOTALL,
-            )
-        else:
-            # Add context at the end of system message
-            return f"{system_message}\n\n<context>\n{escaped_content}\n</context>"
 
     async def _process_task(
         self, user_email, history, web_search_activated, event_emitter, task
