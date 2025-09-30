@@ -1,0 +1,53 @@
+# Multi-stage Dockerfile for Document Extraction (Docling) with space optimization
+# This version reduces intermediate layer size and implements staged building
+
+# Stage 1: Download dependencies in a minimal environment
+FROM alpine:latest as downloader
+
+RUN apk add --no-cache curl tar && \
+    mkdir -p /tessdata && \
+    echo "Downloading Tesseract language files efficiently..." && \
+    # Try to download as compressed archive first (more efficient)
+    (curl -fsSL -o /tmp/tessdata.tar.gz https://github.com/tesseract-ocr/tessdata/archive/refs/heads/main.tar.gz && \
+     tar -xzf /tmp/tessdata.tar.gz -C /tmp --strip-components=1 \
+         tessdata-main/eng.traineddata \
+         tessdata-main/fra.traineddata \
+         tessdata-main/deu.traineddata \
+         tessdata-main/spa.traineddata \
+         tessdata-main/jpn.traineddata && \
+     mv /tmp/tessdata-main/*.traineddata /tessdata/ 2>/dev/null) || \
+    # Fallback to individual downloads if archive method fails
+    (echo "Archive download failed, using individual downloads..." && \
+     curl -fsSL -o /tessdata/eng.traineddata https://github.com/tesseract-ocr/tessdata/raw/main/eng.traineddata && \
+     curl -fsSL -o /tessdata/fra.traineddata https://github.com/tesseract-ocr/tessdata/raw/main/fra.traineddata && \
+     curl -fsSL -o /tessdata/deu.traineddata https://github.com/tesseract-ocr/tessdata/raw/main/deu.traineddata && \
+     curl -fsSL -o /tessdata/spa.traineddata https://github.com/tesseract-ocr/tessdata/raw/main/spa.traineddata && \
+     curl -fsSL -o /tessdata/jpn.traineddata https://github.com/tesseract-ocr/tessdata/raw/main/jpn.traineddata) && \
+    # Verify downloads and clean up
+    rm -rf /tmp/* && \
+    find /tessdata -name "*.traineddata" -exec ls -lh {} \; && \
+    echo "Downloaded $(ls -1 /tessdata/*.traineddata | wc -l) language files"
+
+# Stage 2: Final image based on Docling serve
+FROM quay.io/docling-project/docling-serve:latest
+
+# Switch to root user temporarily
+USER root
+
+# Copy only the downloaded files from the downloader stage
+COPY --from=downloader /tessdata /usr/share/tesseract/tessdata/
+
+# Set proper permissions in a single layer
+RUN chmod -R 755 /usr/share/tesseract/tessdata/ && \
+    find /usr/share/tesseract/tessdata/ -name "*.traineddata" -exec ls -lh {} \; && \
+    echo "Tesseract language files installed successfully"
+
+# Set the working directory to match the base image
+WORKDIR /opt/app-root/src
+
+# Switch back to the default non-root user
+USER default
+
+# Health check to verify the image is working
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:5000/health || exit 1

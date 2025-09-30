@@ -3,16 +3,25 @@ FROM quay.io/docling-project/docling-serve:latest
 # Switch to root user to create directory and download files
 USER root
 
-# Create the /usr/share/tesseract/tessdata directory to match TESSDATA_PREFIX
+# Create directory and download all Tesseract language files in a single layer
+# Clean up package cache and temporary files in the same layer to save space
 RUN mkdir -p /usr/share/tesseract/tessdata && \
-    # Download Tesseract language data files from the official Tesseract GitHub repository
-    curl -L -o /usr/share/tesseract/tessdata/eng.traineddata https://github.com/tesseract-ocr/tessdata/raw/main/eng.traineddata && \
-    curl -L -o /usr/share/tesseract/tessdata/fra.traineddata https://github.com/tesseract-ocr/tessdata/raw/main/fra.traineddata && \
-    curl -L -o /usr/share/tesseract/tessdata/deu.traineddata https://github.com/tesseract-ocr/tessdata/raw/main/deu.traineddata && \
-    curl -L -o /usr/share/tesseract/tessdata/spa.traineddata https://github.com/tesseract-ocr/tessdata/raw/main/spa.traineddata && \
-    curl -L -o /usr/share/tesseract/tessdata/jpn.traineddata https://github.com/tesseract-ocr/tessdata/raw/main/jpn.traineddata && \
-    # Set permissions to ensure accessibility
-    chmod -R 755 /usr/share/tesseract/tessdata/
+    curl -fsSL -o /tmp/lang_files.tar.gz https://github.com/tesseract-ocr/tessdata/archive/refs/heads/main.tar.gz && \
+    tar -xzf /tmp/lang_files.tar.gz -C /tmp --strip-components=1 tessdata-main/eng.traineddata tessdata-main/fra.traineddata tessdata-main/deu.traineddata tessdata-main/spa.traineddata tessdata-main/jpn.traineddata 2>/dev/null || \
+    { \
+        echo "Fallback to individual downloads..." && \
+        curl -fsSL -o /usr/share/tesseract/tessdata/eng.traineddata https://github.com/tesseract-ocr/tessdata/raw/main/eng.traineddata && \
+        curl -fsSL -o /usr/share/tesseract/tessdata/fra.traineddata https://github.com/tesseract-ocr/tessdata/raw/main/fra.traineddata && \
+        curl -fsSL -o /usr/share/tesseract/tessdata/deu.traineddata https://github.com/tesseract-ocr/tessdata/raw/main/deu.traineddata && \
+        curl -fsSL -o /usr/share/tesseract/tessdata/spa.traineddata https://github.com/tesseract-ocr/tessdata/raw/main/spa.traineddata && \
+        curl -fsSL -o /usr/share/tesseract/tessdata/jpn.traineddata https://github.com/tesseract-ocr/tessdata/raw/main/jpn.traineddata; \
+    } && \
+    if [ -d "/tmp/tessdata-main" ]; then \
+        mv /tmp/tessdata-main/*.traineddata /usr/share/tesseract/tessdata/ 2>/dev/null || true; \
+    fi && \
+    chmod -R 755 /usr/share/tesseract/tessdata/ && \
+    rm -rf /tmp/lang_files.tar.gz /tmp/tessdata-main /var/cache/apk/* /tmp/* && \
+    find /usr/share/tesseract/tessdata/ -name "*.traineddata" -exec ls -lh {} \;
 
 # Set the working directory to match the base image
 WORKDIR /opt/app-root/src
