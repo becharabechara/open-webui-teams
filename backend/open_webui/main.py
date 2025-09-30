@@ -2008,45 +2008,85 @@ import logging
 import base64
 import mimetypes
 import aiohttp
+import os
+import time
+import asyncio
+from typing import Optional, Callable, Any
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-async def process_user_session(oauth_manager: OAuthManager, request: Request, user_data: dict, access_token: str, id_token: str):
+
+async def async_retry(
+    func: Callable,
+    max_retries: int,
+    *args,
+    **kwargs
+) -> Any:
+    """Generic async retry helper with exponential backoff."""
+    for attempt in range(max_retries + 1):
+        try:
+            return await func(*args, **kwargs)
+        except (httpx.RequestError, httpx.HTTPStatusError) as e:
+            if attempt == max_retries:
+                raise e
+            # Exponential backoff with jitter
+            delay = min(2 ** attempt, 5)  # Cap at 5 seconds
+            await asyncio.sleep(delay)
+    
+
+async def fetch_profile_image(picture_url: str, access_token: str, email: str) -> str:
+    """Fetch and encode profile image from Microsoft Graph API."""
+    if not picture_url or not picture_url.startswith("https://graph.microsoft.com"):
+        return picture_url or "/user.png"
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            headers = {"Authorization": f"Bearer {access_token}"}
+            log.info(f"Fetching profile image for user {email}")
+            async with session.get(picture_url, headers=headers) as resp:
+                if resp.ok:
+                    picture = await resp.read()
+                    base64_encoded_picture = base64.b64encode(picture).decode("utf-8")
+                    guessed_mime_type = mimetypes.guess_type(picture_url)[0] or "image/jpeg"
+                    log.info(f"Profile image fetched for user {email}")
+                    return f"data:{guessed_mime_type};base64,{base64_encoded_picture}"
+                else:
+                    error_text = await resp.text()
+                    log.warning(f"No profile image found for user {email}: {resp.status} {error_text}")
+                    return "/user.png"
+    except Exception as e:
+        log.error(f"Error fetching profile image for user {email}: {str(e)}")
+        return "/user.png"
+
+async def process_user_session(
+    oauth_manager: OAuthManager, 
+    request: Request, 
+    user_data: dict, 
+    access_token: str, 
+    id_token: str
+) -> dict:
     """Process user data, fetch profile image, and generate a JWT token."""
     log.info("Processing user session")
+    
+    # Validate required fields early
     sub = user_data.get("sub")
     if not sub:
         log.error("Missing subject ID in user_data")
         raise HTTPException(400, detail="Invalid credentials: Missing subject ID")
-    provider_sub = f"microsoft@{sub}"
+    
     email = user_data.get(auth_manager_config.OAUTH_EMAIL_CLAIM, "").lower()
     if not email:
         log.error("Missing email in user_data")
         raise HTTPException(400, detail="Invalid credentials: Missing email")
-
-    # Fetch and encode profile image
+    
+    provider_sub = f"microsoft@{sub}"
+    
+    # Fetch profile image asynchronously
     picture_url = user_data.get(auth_manager_config.OAUTH_PICTURE_CLAIM, "/user.png")
-    if picture_url and picture_url.startswith("https://graph.microsoft.com"):
-        try:
-            async with aiohttp.ClientSession() as session:
-                headers = {"Authorization": f"Bearer {access_token}"}
-                log.info(f"Fetching profile image for user {email}")
-                async with session.get(picture_url, headers=headers) as resp:
-                    if resp.ok:
-                        picture = await resp.read()
-                        base64_encoded_picture = base64.b64encode(picture).decode("utf-8")
-                        guessed_mime_type = mimetypes.guess_type(picture_url)[0] or "image/jpeg"
-                        picture_url = f"data:{guessed_mime_type};base64,{base64_encoded_picture}"
-                        log.info(f"Profile image fetched for user {email}")
-                    else:
-                        error_text = await resp.text()
-                        log.warning(f"No profile image found for user {email}: {resp.status} {error_text}")
-                        picture_url = "/user.png"
-        except Exception as e:
-            log.error(f"Error fetching profile image for user {email}: {str(e)}")
-            picture_url = "/user.png"
+    picture_url = await fetch_profile_image(picture_url, access_token, email)
 
+    # Find or merge user account
     user = Users.get_user_by_oauth_sub(provider_sub)
     if not user and auth_manager_config.OAUTH_MERGE_ACCOUNTS_BY_EMAIL:
         user = Users.get_user_by_email(email)
@@ -2056,10 +2096,12 @@ async def process_user_session(oauth_manager: OAuthManager, request: Request, us
 
     role = oauth_manager.get_user_role(user, user_data)
 
+    # Create new user or update existing
     if not user:
         if not auth_manager_config.ENABLE_OAUTH_SIGNUP:
             log.error("Account creation disabled")
             raise HTTPException(403, detail="Account creation disabled")
+        
         name = user_data.get(auth_manager_config.OAUTH_USERNAME_CLAIM, email.split("@")[0])
         log.info(f"Creating new user: email={email}, name={name}")
         user = Users.insert_new_user(
@@ -2071,9 +2113,12 @@ async def process_user_session(oauth_manager: OAuthManager, request: Request, us
             oauth_sub=provider_sub,
         )
     else:
+        # Update user role if it has changed
         if user.role != role:
             log.info(f"Updating user role from {user.role} to {role}")
             Users.update_user_role_by_id(user.id, role)
+        
+        # Update user activity and profile image
         Users.update_user_by_id(user.id, {
             "last_active_at": int(time.time()),
             "profile_image_url": picture_url
@@ -2088,10 +2133,12 @@ async def process_user_session(oauth_manager: OAuthManager, request: Request, us
             default_permissions=request.app.state.config.USER_PERMISSIONS or {}
         )
 
+    # Generate JWT token
     token = create_token(
         data={"id": user.id},
         expires_delta=parse_duration(auth_manager_config.JWT_EXPIRES_IN)
     )
+    
     return {
         "id": user.id,
         "email": user.email,
@@ -2100,64 +2147,77 @@ async def process_user_session(oauth_manager: OAuthManager, request: Request, us
         "token": token
     }
 
-async def handle_teams_auth(request: Request, token: str, redirect_uri: Optional[str] = None):
+async def handle_teams_auth(
+    request: Request, 
+    token: str, 
+    redirect_uri: Optional[str] = None
+) -> dict:
     """Handle Teams authentication by validating the token and retrieving user info."""
     log.info("Handling Teams authentication")
+    
     if not token:
         log.error("No token provided")
         raise HTTPException(400, detail="No token provided")
 
+    client = oauth_manager.get_client("microsoft")
+    if not client:
+        log.error("Microsoft OAuth provider not configured")
+        raise HTTPException(400, detail="Microsoft OAuth provider not configured")
+
     try:
-        client = oauth_manager.get_client("microsoft")
-        if not client:
-            log.error("Microsoft OAuth provider not configured")
-            raise HTTPException(400, detail="Microsoft OAuth provider not configured")
+        # Token exchange with retry
+        async def fetch_token():
+            return await client.fetch_access_token(
+                grant_type="urn:ietf:params:oauth:grant-type:jwt-bearer",
+                assertion=token,
+                client_id=os.getenv("MICROSOFT_CLIENT_ID"),
+                client_secret=os.getenv("MICROSOFT_CLIENT_SECRET"),
+                scope="openid profile email User.Read",
+                requested_token_use="on_behalf_of"
+            )
+        
+        try:
+            token_data = await async_retry(fetch_token, max_retries=1)
+            log.info("Token exchange successful")
+        except (httpx.RequestError, httpx.HTTPStatusError) as e:
+            log.error(f"Token exchange failed after retries: {str(e)}")
+            raise HTTPException(503, detail="Token exchange failed")
 
-        max_retries = 1
-        for attempt in range(max_retries + 1):
-            try:
-                token_data = await client.fetch_access_token(
-                    grant_type="urn:ietf:params:oauth:grant-type:jwt-bearer",
-                    assertion=token,
-                    client_id=os.getenv("MICROSOFT_CLIENT_ID"),
-                    client_secret=os.getenv("MICROSOFT_CLIENT_SECRET"),
-                    scope="openid profile email User.Read",
-                    requested_token_use="on_behalf_of"
-                )
-                log.info("Token exchange successful")
-                break
-            except (httpx.RequestError, httpx.HTTPStatusError) as e:
-                log.error(f"Token exchange attempt {attempt + 1}/{max_retries} failed: {str(e)}")
-                if attempt == max_retries:
-                    raise HTTPException(503, detail="Token exchange failed")
-                await asyncio.sleep(1)
-
-        if not token_data.get("access_token") or not token_data.get("id_token"):
+        # Validate token response
+        access_token = token_data.get("access_token")
+        id_token = token_data.get("id_token")
+        if not access_token or not id_token:
             log.error("Invalid token response from provider")
             raise HTTPException(400, detail="Invalid token response from provider")
 
-        max_retries = 2
-        for attempt in range(max_retries + 1):
-            try:
-                user_data = await client.userinfo(token=token_data)
-                if not isinstance(user_data, dict):
-                    log.error("Invalid userinfo response")
-                    raise HTTPException(400, detail="Invalid userinfo response")
-                log.info(f"User data retrieved for email {user_data.get('email', 'unknown')}")
-                user_response = await process_user_session(oauth_manager, request, user_data, token_data.get("access_token"), token_data.get("id_token"))
-                return {
-                    "user": user_response,
-                    "id_token": token_data.get("id_token")
-                }
-            except (httpx.RequestError, httpx.HTTPStatusError) as e:
-                log.error(f"Userinfo attempt {attempt + 1}/{max_retries} failed: {str(e)}")
-                if attempt == max_retries:
-                    raise HTTPException(400, detail="Failed to fetch user info")
-                await asyncio.sleep(1)
-
-    except HTTPException as e:
-        log.error(f"Authentication failed: {str(e)}")
-        raise e
+        # Fetch user info with retry
+        async def fetch_userinfo():
+            return await client.userinfo(token=token_data)
+        
+        try:
+            user_data = await async_retry(fetch_userinfo, max_retries=2)
+        except (httpx.RequestError, httpx.HTTPStatusError) as e:
+            log.error(f"Failed to fetch user info after retries: {str(e)}")
+            raise HTTPException(400, detail="Failed to fetch user info")
+        
+        if not isinstance(user_data, dict):
+            log.error("Invalid userinfo response")
+            raise HTTPException(400, detail="Invalid userinfo response")
+        
+        log.info(f"User data retrieved for email {user_data.get('email', 'unknown')}")
+        
+        # Process user session
+        user_response = await process_user_session(
+            oauth_manager, request, user_data, access_token, id_token
+        )
+        
+        return {
+            "user": user_response,
+            "id_token": id_token
+        }
+        
+    except HTTPException:
+        raise
     except Exception as e:
         log.error(f"Unexpected error during authentication: {str(e)}")
         raise HTTPException(400, detail="Authentication failed")
@@ -2166,28 +2226,35 @@ class TeamsAuthRequest(BaseModel):
     token: str
 
 @app.post("/api/teams/auth")
-async def teams_auth_api(request: Request, body: TeamsAuthRequest):
+async def teams_auth_api(request: Request, body: TeamsAuthRequest) -> JSONResponse:
+    """Microsoft Teams authentication endpoint."""
     log.info("Received Teams auth request")
+    
     try:
+        # Generate redirect URI
         base_url = str(request.base_url).rstrip("/")
         redirect_uri = f"{base_url}/oauth/microsoft/callback"
+        
+        # Handle authentication
         result = await handle_teams_auth(request, body.token, redirect_uri)
-        user = result["user"]
-        id_token = result["id_token"]
-
-        response = JSONResponse(content=user)
+        
+        # Create response with secure cookie
+        response = JSONResponse(content=result["user"])
         response.set_cookie(
             key="oauth_id_token",
-            value=id_token,
+            value=result["id_token"],
             httponly=True,
             samesite=WEBUI_AUTH_COOKIE_SAME_SITE,
             secure=WEBUI_AUTH_COOKIE_SECURE,
         )
         return response
-
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions with proper status codes
+        raise
     except Exception as e:
-        log.error(f"Error in teams_auth_api: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        log.error(f"Unexpected error in teams_auth_api: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
     
 if os.path.exists(FRONTEND_BUILD_DIR):
     mimetypes.add_type("text/javascript", ".js")
