@@ -47,7 +47,6 @@ services:
       - jupyter-data:/jupyter-files
     depends_on:
       - ollama
-      - qdrant
       - docling
       - jupyter
       - postgres
@@ -69,18 +68,6 @@ services:
                chgrp -R sharedgroup /jupyter-files && \
                chmod -R g+w /jupyter-files && \
                bash /app/backend/start.sh"
-    restart: unless-stopped
-
-  maintenance:
-    build:
-      context: ./MaintenanceApp
-      dockerfile: Dockerfile
-    image: lagoon-maintenance:latest
-    container_name: maintenance
-    ports:
-      - "5000:5000"
-    env_file:
-      - ./MaintenanceApp/.env
     restart: unless-stopped
 
   jupyter:
@@ -117,18 +104,8 @@ services:
       retries: 3
       start_period: 60s
 
-  qdrant:
-    image: qdrant/qdrant
-    container_name: qdrant
-    restart: unless-stopped
-    ports:
-      - "6333:6333"
-      - "6334:6334"
-    volumes:
-      - qdrant_data:/qdrant/storage
-
   tika:
-    image: apache/tika:${TIKA_VERSION-2.9.1.0}
+    image: apache/tika:${TIKA_VERSION-3.2.3.0-full}
     container_name: tika
     restart: unless-stopped
     ports:
@@ -174,6 +151,5 @@ services:
 volumes:
   ollama: {}
   open-webui: {}
-  qdrant_data: {}
   jupyter-data: {}
   postgres-data: {}
