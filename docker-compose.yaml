@@ -14,6 +14,8 @@ services:
       - OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL}
       - OLLAMA_MAX_LOADED_MODELS=${OLLAMA_MAX_LOADED_MODELS}
       - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE}
+    networks:
+      - open-webui-network
 
   postgres:
     image: postgres:latest
@@ -33,6 +35,14 @@ services:
     extra_hosts:
       - host.docker.internal:host-gateway
       - api-dev.tikehaucapital.com:192.168.10.53
+    networks:
+      - open-webui-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DATABASE_USER} -d ${DATABASE_NAME}"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
   open-webui:
     build:
@@ -46,10 +56,10 @@ services:
       - open-webui:/app/backend/data
       - jupyter-data:/jupyter-files
     depends_on:
+      - postgres
       - ollama
       - docling
       - jupyter
-      - postgres
     ports:
       - ${OPEN_WEBUI_PORT-3000}:8080
     env_file:
@@ -69,6 +79,8 @@ services:
                chmod -R g+w /jupyter-files && \
                bash /app/backend/start.sh"
     restart: unless-stopped
+    networks:
+      - open-webui-network
 
   jupyter:
     build:
@@ -103,6 +115,8 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
+    networks:
+      - open-webui-network
 
   tika:
     image: apache/tika:${TIKA_VERSION-3.2.3.0-full}
@@ -115,6 +129,8 @@ services:
       interval: ${TIKA_HEALTHCHECK_INTERVAL-60s}
       timeout: ${TIKA_HEALTHCHECK_TIMEOUT-10s}
       retries: ${TIKA_HEALTHCHECK_RETRIES-3}
+    networks:
+      - open-webui-network
 
   docling:
     build:
@@ -137,6 +153,8 @@ services:
         limits:
           cpus: '2'
           memory: 4g
+    networks:
+      - open-webui-network
 
   cloudflared:
     image: cloudflare/cloudflared:latest
@@ -147,9 +165,15 @@ services:
       - ./cloudflared:/etc/cloudflared
     depends_on:
       - open-webui
+    networks:
+      - open-webui-network
 
 volumes:
   ollama: {}
   open-webui: {}
   jupyter-data: {}
   postgres-data: {}
+
+networks:
+  open-webui-network:
+    driver: bridge
