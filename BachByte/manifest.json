@@ -1,0 +1,44 @@
+{
+    "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.16/MicrosoftTeams.schema.json",
+    "manifestVersion": "1.16",
+    "version": "1.0.0",
+    "id": "42ae1aca-3e08-4971-a1a3-6e163dd93d61",
+    "packageName": "com.microsoft.teams.extension",
+    "developer": {
+        "name": "Bechara Bechara",
+        "websiteUrl": "https://becharabechara.me",
+        "privacyUrl": "https://becharabechara.me",
+        "termsOfUseUrl": "https://becharabechara.me"
+    },
+    "icons": {
+        "color": "web-app-manifest-192x192.png",
+        "outline": "favicon-96x96.png"
+    },
+    "name": {
+        "short": "BachByte",
+        "full": "Full name for BachByte Open WebUI"
+    },
+    "description": {
+        "short": "BachByte’s intelligent assistant for quick, responsible information access.",
+        "full": "BachByte is an AI-powered assistant integrated within Microsoft Teams, designed to provide users with quick and responsible access to information. Leveraging advanced language models, BachByte helps users find answers, generate content, and streamline workflows directly within their Teams environment."
+    },
+    "accentColor": "#FFFFFF",
+    "staticTabs": [
+        {
+            "entityId": "index",
+            "name": "BachByte",
+            "contentUrl": "https://becharabechara.me/teams",
+            "websiteUrl": "https://becharabechara.me",
+            "scopes": ["personal"]
+        }
+    ],
+    "permissions": ["identity"],
+    "validDomains": [
+        "becharabechara.me",
+		"login.microsoftonline.com"
+    ],
+    "webApplicationInfo": {
+        "id": "42ae1aca-3e08-4971-a1a3-6e163dd93d61",
+        "resource": "api://becharabechara.me/42ae1aca-3e08-4971-a1a3-6e163dd93d61"
+    }
+}

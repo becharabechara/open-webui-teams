@@ -59,7 +59,7 @@ This section outlines the procedure to update the OpenWebUI image by pulling the
 
 After merging, ensure that none of your custom modifications are affected. Refer to the following wiki pages for the specific files and modifications to check:
 
-- **[Tikehau Capital Lagoon Branding](/index/tikehau-branding.md)**: Verify that all branding-related static resources and configuration changes are preserved.
+- **[BachByte Branding](/index/bachbyte-branding.md)**: Verify that all branding-related static resources and configuration changes are preserved.
 - **[Azure AI Foundry Support](/index/azure-ai-foundry.md)**: Confirm that the Azure AI API version configurations and backend modifications for API calls are intact.
 - **[Teams Custom Integration](/index/teams-integration.md)**: Ensure that all Teams-related changes, including SDK integration, authentication routes, and security headers, are unaffected.
 
@@ -83,7 +83,7 @@ Before committing changes, build and test the updated image locally to ensure co
 2. **Build the Docker Image**:
    - In your project directory, build the Docker image with the new version tag and also tag it as `latest`:
      ```
-     docker build -t lagoon-open-webui:v0.5.5 -t lagoon-open-webui:latest .
+     docker build -t BachByte-open-webui:v0.5.5 -t BachByte-open-webui:latest .
      ```
 
 3. **Test with Local Docker Compose**:
@@ -91,7 +91,7 @@ Before committing changes, build and test the updated image locally to ensure co
      ```yaml
      services:
        open-webui:
-         image: lagoon-open-webui:v0.5.6
+         image: BachByte-open-webui:v0.5.6
          # ... other configurations ...
      ```
    - Start the services using Docker Compose (Ngrok is already configured in your `docker-compose.yaml`):
@@ -103,7 +103,7 @@ Before committing changes, build and test the updated image locally to ensure co
 4. **Verify Functionality**:
    - **SSO Authentication**: Log in using Entra ID SSO to ensure the OAuth flow works correctly.
    - **Teams Integration**: Test the Teams authentication flow by accessing the `/teams` route or embedding OpenWebUI in a Teams tab (refer to [Teams Custom Integration](/index/teams-integration.md)).
-   - **Branding**: Verify that all Tikehau Capital Lagoon branding assets are displayed correctly (refer to [Tikehau Capital Lagoon Branding](/index/tikehau-branding.md)).
+   - **Branding**: Verify that all BachByte branding assets are displayed correctly (refer to [BachByte Branding](/index/bachbyte-branding.md)).
    - **Azure AI Foundry**: Test API calls to Azure AI Foundry to ensure the custom configurations are functioning (refer to [Azure AI Foundry Support](/index/azure-ai-foundry.md)).
    - **General Functionality**: Test core features like chat, document processing, and model interactions to ensure no regressions.
 
@@ -121,7 +121,7 @@ Before committing changes, build and test the updated image locally to ensure co
      ```yaml
      services:
        open-webui:
-         image: lagoon-open-webui:v0.5.6
+         image: BachByte-open-webui:v0.5.6
          # ... other configurations ...
      ```
 
@@ -165,7 +165,7 @@ Before committing changes, build and test the updated image locally to ensure co
 
 ## Step 8: Deploy to Production via Azure DevOps Pipelines
 
-- **Note on Docker Push**: You do not need to manually push the Docker image to Azure Container Registry (ACR). Azure DevOps pipelines are configured to handle the build and push of the `lagoon-open-webui:v0.5.6` and `lagoon-open-webui:latest` images to ACR as part of the deployment process.
+- **Note on Docker Push**: You do not need to manually push the Docker image to Azure Container Registry (ACR). Azure DevOps pipelines are configured to handle the build and push of the `BachByte-open-webui:v0.5.6` and `BachByte-open-webui:latest` images to ACR as part of the deployment process.
 - After pushing the changes to Azure DevOps, trigger your deployment pipeline to build and deploy the updated image to your production environment.
 - Monitor the deployment for any issues and roll back if necessary.
 
