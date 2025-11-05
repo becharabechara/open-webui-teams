@@ -85,22 +85,22 @@ Navigate to the **Admin Panel** in OpenWebUI to configure the settings as follow
 
 ### Models Tab
 
-- After deploying the custom functions for Azure AI, Lagoon, and Lagoon DDQ (see below), a list of models should be available.
+- After deploying the custom functions for Azure AI, BachByte, and BachByte DDQ (see below), a list of models should be available.
 - Configure visibility for each model:
   - **Azure AI Models**: Set visibility to `Public` or `Private` based on your requirements.
-  - **Lagoon Models**: Set visibility to `Public` or `Private` based on your requirements.
-  - **Lagoon DDQ Models**: Set visibility to `Private` and ensure access is restricted to the `Lagoon DDQ` group (configured in the Users tab).
+  - **BachByte Models**: Set visibility to `Public` or `Private` based on your requirements.
+  - **BachByte DDQ Models**: Set visibility to `Private` and ensure access is restricted to the `BachByte DDQ` group (configured in the Users tab).
 
 ## Step 3: Configure User Groups
 
 Navigate to the **Users Tab** in the Admin Panel:
 
 1. **Groups Tab**:
-   - Create a new group named `Lagoon DDQ`.
+   - Create a new group named `BachByte DDQ`.
    - Add the desired users to this group.
 2. **Model Visibility**:
    - Go back to the **Models Tab**.
-   - For the `Lagoon DDQ` models, ensure the visibility is set to `Private` and select the `Lagoon DDQ` group in the visibility settings to restrict access.
+   - For the `BachByte DDQ` models, ensure the visibility is set to `Private` and select the `BachByte DDQ` group in the visibility settings to restrict access.
 
 ## Step 4: Create Custom Functions
 
@@ -118,18 +118,18 @@ Navigate to the **Functions** section in the Admin Panel to create and configure
   - **Azure AI Model In Body**: Set to `Enabled`.
   - **Use Predefined Azure AI Models**: Set to `Enabled`.
 
-### Lagoon Function
+### BachByte Function
 
-- **Name**: `Lagoon` (ID: `lagoon`)
-- **Description**: `Lagoon DDQ`
-- **Content**: Copy the content from the DevOps repository at `/Custom_Functions/Lagoon.py`.
+- **Name**: `BachByte` (ID: `BachByte`)
+- **Description**: `BachByte DDQ`
+- **Content**: Copy the content from the DevOps repository at `/Custom_Functions/BachByte.py`.
 - **Valves Configuration**: No valves to configure.
 
-### Lagoon DDQ Function
+### BachByte DDQ Function
 
-- **Name**: `Lagoon DDQ` (ID: `lagoon_ddq`)
-- **Description**: `Lagoon DDQ`
-- **Content**: Copy the content from the DevOps repository at `/Custom_Functions/Lagoon_ddq.py`.
+- **Name**: `BachByte DDQ` (ID: `BachByte_ddq`)
+- **Description**: `BachByte DDQ`
+- **Content**: Copy the content from the DevOps repository at `/Custom_Functions/BachByte_ddq.py`.
 - **Valves Configuration**: No valves to configure.
 
 ## Step 5: Activate Functions and Configure Model Visibility
@@ -138,7 +138,7 @@ Navigate to the **Functions** section in the Admin Panel to create and configure
    - After creating the functions, activate them in the Functions section.
 2. **Revisit Models Tab**:
    - Go back to **Admin Panel Settings > Models**.
-   - Configure the visibility of the models associated with the newly created functions (Azure AI, Lagoon, Lagoon DDQ) as specified in the Models Tab section above.
+   - Configure the visibility of the models associated with the newly created functions (Azure AI, BachByte, BachByte DDQ) as specified in the Models Tab section above.
 
 ---
 

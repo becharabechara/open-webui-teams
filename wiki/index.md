@@ -4,8 +4,8 @@ Welcome to the OpenWebUI Modifications Wiki. This wiki documents all custom modi
 
 ## Wiki Pages
 
-- [Tikehau Capital Lagoon Branding](/index/tikehau-branding)  
-  Describes modifications to align the project with Tikehau Capital Lagoon branding, including static resource replacements and configuration changes.
+- [BachByte Branding](/index/bachbyte-branding)  
+  Describes modifications to align the project with BachByte branding, including static resource replacements and configuration changes.
 
 - [Azure AI Foundry Support](/index/azure-ai-foundry.md)  
   Details changes to support Azure AI Foundry, including API version configurations and backend adjustments.

@@ -1,10 +1,10 @@
-# Tikehau Capital Lagoon Branding Modifications
+# BachByte Branding Modifications
 
-This section documents the modifications applied to the OpenWebUI project to align with Tikehau Capital Lagoon branding. The changes involve replacing static resources and updating configuration files to reflect the new branding identity.
+This section documents the modifications applied to the OpenWebUI project to align with BachByte branding. The changes involve replacing static resources and updating configuration files to reflect the new branding identity.
 
 ## Static Resource Replacements
 
-The following static resources were replaced to incorporate Tikehau Capital Lagoon branding:
+The following static resources were replaced to incorporate BachByte branding:
 
 ### In `backend/open_webui/static/`
 
@@ -85,4 +85,4 @@ To use a local favicon instead of the default `WEBUI_FAVICON_URL`, the following
   }
   ```
 
-These changes ensure that webhook notifications display the Tikehau Capital Lagoon favicon.
+These changes ensure that webhook notifications display the BachByte favicon.
