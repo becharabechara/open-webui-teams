@@ -46,8 +46,6 @@ services:
   open-webui:
     build:
       context: .
-      args:
-        OLLAMA_BASE_URL: '/ollama'
       dockerfile: Dockerfile
     image: bachbyte-open-webui:v0.6.34
     container_name: open-webui
