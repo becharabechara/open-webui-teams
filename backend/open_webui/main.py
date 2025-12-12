@@ -61,11 +61,11 @@ from open_webui.utils import logger
 from open_webui.utils.audit import AuditLevel, AuditLoggingMiddleware
 from open_webui.utils.logger import start_logger
 from open_webui.socket.main import (
+    MODELS,
     app as socket_app,
     periodic_usage_pool_cleanup,
     get_event_emitter,
     get_models_in_use,
-    get_active_user_ids,
 )
 from open_webui.routers import (
     audio,
@@ -160,9 +160,11 @@ from open_webui.config import (
     IMAGES_OPENAI_API_BASE_URL,
     IMAGES_OPENAI_API_VERSION,
     IMAGES_OPENAI_API_KEY,
+    IMAGES_OPENAI_API_PARAMS,
     IMAGES_GEMINI_API_BASE_URL,
     IMAGES_GEMINI_API_KEY,
     IMAGES_GEMINI_ENDPOINT_METHOD,
+    ENABLE_IMAGE_EDIT,
     IMAGE_EDIT_ENGINE,
     IMAGE_EDIT_MODEL,
     IMAGE_EDIT_SIZE,
@@ -228,6 +230,7 @@ from open_webui.config import (
     RAG_RERANKING_MODEL_TRUST_REMOTE_CODE,
     RAG_EMBEDDING_ENGINE,
     RAG_EMBEDDING_BATCH_SIZE,
+    ENABLE_ASYNC_EMBEDDING,
     RAG_TOP_K,
     RAG_TOP_K_RERANKER,
     RAG_RELEVANCE_THRESHOLD,
@@ -266,20 +269,11 @@ from open_webui.config import (
     EXTERNAL_DOCUMENT_LOADER_API_KEY,
     TIKA_SERVER_URL,
     DOCLING_SERVER_URL,
+    DOCLING_API_KEY,
     DOCLING_PARAMS,
-    DOCLING_DO_OCR,
-    DOCLING_FORCE_OCR,
-    DOCLING_OCR_ENGINE,
-    DOCLING_OCR_LANG,
-    DOCLING_PDF_BACKEND,
-    DOCLING_TABLE_MODE,
-    DOCLING_PIPELINE,
-    DOCLING_DO_PICTURE_DESCRIPTION,
-    DOCLING_PICTURE_DESCRIPTION_MODE,
-    DOCLING_PICTURE_DESCRIPTION_LOCAL,
-    DOCLING_PICTURE_DESCRIPTION_API,
     DOCUMENT_INTELLIGENCE_ENDPOINT,
     DOCUMENT_INTELLIGENCE_KEY,
+    DOCUMENT_INTELLIGENCE_MODEL,
     MISTRAL_OCR_API_BASE_URL,
     MISTRAL_OCR_API_KEY,
     RAG_TEXT_SPLITTER,
@@ -319,6 +313,7 @@ from open_webui.config import (
     PERPLEXITY_API_KEY,
     PERPLEXITY_MODEL,
     PERPLEXITY_SEARCH_CONTEXT_USAGE,
+    PERPLEXITY_SEARCH_API_URL,
     SOUGOU_API_SID,
     SOUGOU_API_SK,
     KAGI_SEARCH_API_KEY,
@@ -336,6 +331,7 @@ from open_webui.config import (
     ENABLE_ONEDRIVE_PERSONAL,
     ENABLE_ONEDRIVE_BUSINESS,
     ENABLE_RAG_HYBRID_SEARCH,
+    ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS,
     ENABLE_RAG_LOCAL_WEB_FETCH,
     ENABLE_WEB_LOADER_SSL_VERIFICATION,
     ENABLE_GOOGLE_DRIVE_INTEGRATION,
@@ -354,9 +350,10 @@ from open_webui.config import (
     JWT_EXPIRES_IN,
     ENABLE_SIGNUP,
     ENABLE_LOGIN_FORM,
-    ENABLE_API_KEY,
-    ENABLE_API_KEY_ENDPOINT_RESTRICTIONS,
-    API_KEY_ALLOWED_ENDPOINTS,
+    ENABLE_API_KEYS,
+    ENABLE_API_KEYS_ENDPOINT_RESTRICTIONS,
+    API_KEYS_ALLOWED_ENDPOINTS,
+    ENABLE_FOLDERS,
     ENABLE_CHANNELS,
     ENABLE_NOTES,
     ENABLE_COMMUNITY_SHARING,
@@ -366,10 +363,12 @@ from open_webui.config import (
     BYPASS_ADMIN_ACCESS_CONTROL,
     USER_PERMISSIONS,
     DEFAULT_USER_ROLE,
+    DEFAULT_GROUP_ID,
     PENDING_USER_OVERLAY_CONTENT,
     PENDING_USER_OVERLAY_TITLE,
     DEFAULT_PROMPT_SUGGESTIONS,
     DEFAULT_MODELS,
+    DEFAULT_PINNED_MODELS,
     DEFAULT_ARENA_MODEL,
     MODEL_ORDER_LIST,
     EVALUATION_ARENA_MODELS,
@@ -428,6 +427,7 @@ from open_webui.config import (
     TAGS_GENERATION_PROMPT_TEMPLATE,
     IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE,
     TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE,
+    VOICE_MODE_PROMPT_TEMPLATE,
     QUERY_GENERATION_PROMPT_TEMPLATE,
     AUTOCOMPLETE_GENERATION_PROMPT_TEMPLATE,
     AUTOCOMPLETE_GENERATION_INPUT_MAX_LENGTH,
@@ -449,6 +449,7 @@ from open_webui.env import (
     SAFE_MODE,
     SRC_LOG_LEVELS,
     VERSION,
+    DEPLOYMENT_ID,
     INSTANCE_ID,
     WEBUI_BUILD_HASH,
     WEBUI_SECRET_KEY,
@@ -459,7 +460,7 @@ from open_webui.env import (
     WEBUI_AUTH_TRUSTED_NAME_HEADER,
     WEBUI_AUTH_SIGNOUT_REDIRECT_URL,
     # SCIM
-    SCIM_ENABLED,
+    ENABLE_SCIM,
     SCIM_TOKEN,
     ENABLE_COMPRESSION_MIDDLEWARE,
     ENABLE_WEBSOCKET_SUPPORT,
@@ -715,7 +716,7 @@ app.state.config.ENABLE_DIRECT_CONNECTIONS = ENABLE_DIRECT_CONNECTIONS
 #
 ########################################
 
-app.state.SCIM_ENABLED = SCIM_ENABLED
+app.state.ENABLE_SCIM = ENABLE_SCIM
 app.state.SCIM_TOKEN = SCIM_TOKEN
 
 ########################################
@@ -737,11 +738,11 @@ app.state.config.WEBUI_URL = WEBUI_URL
 app.state.config.ENABLE_SIGNUP = ENABLE_SIGNUP
 app.state.config.ENABLE_LOGIN_FORM = ENABLE_LOGIN_FORM
 
-app.state.config.ENABLE_API_KEY = ENABLE_API_KEY
-app.state.config.ENABLE_API_KEY_ENDPOINT_RESTRICTIONS = (
-    ENABLE_API_KEY_ENDPOINT_RESTRICTIONS
+app.state.config.ENABLE_API_KEYS = ENABLE_API_KEYS
+app.state.config.ENABLE_API_KEYS_ENDPOINT_RESTRICTIONS = (
+    ENABLE_API_KEYS_ENDPOINT_RESTRICTIONS
 )
-app.state.config.API_KEY_ALLOWED_ENDPOINTS = API_KEY_ALLOWED_ENDPOINTS
+app.state.config.API_KEYS_ALLOWED_ENDPOINTS = API_KEYS_ALLOWED_ENDPOINTS
 
 app.state.config.JWT_EXPIRES_IN = JWT_EXPIRES_IN
 
@@ -750,8 +751,13 @@ app.state.config.ADMIN_EMAIL = ADMIN_EMAIL
 
 
 app.state.config.DEFAULT_MODELS = DEFAULT_MODELS
+app.state.config.DEFAULT_PINNED_MODELS = DEFAULT_PINNED_MODELS
+app.state.config.MODEL_ORDER_LIST = MODEL_ORDER_LIST
+
+
 app.state.config.DEFAULT_PROMPT_SUGGESTIONS = DEFAULT_PROMPT_SUGGESTIONS
 app.state.config.DEFAULT_USER_ROLE = DEFAULT_USER_ROLE
+app.state.config.DEFAULT_GROUP_ID = DEFAULT_GROUP_ID
 
 app.state.config.PENDING_USER_OVERLAY_CONTENT = PENDING_USER_OVERLAY_CONTENT
 app.state.config.PENDING_USER_OVERLAY_TITLE = PENDING_USER_OVERLAY_TITLE
@@ -761,9 +767,9 @@ app.state.config.RESPONSE_WATERMARK = RESPONSE_WATERMARK
 app.state.config.USER_PERMISSIONS = USER_PERMISSIONS
 app.state.config.WEBHOOK_URL = WEBHOOK_URL
 app.state.config.BANNERS = WEBUI_BANNERS
-app.state.config.MODEL_ORDER_LIST = MODEL_ORDER_LIST
 
 
+app.state.config.ENABLE_FOLDERS = ENABLE_FOLDERS
 app.state.config.ENABLE_CHANNELS = ENABLE_CHANNELS
 app.state.config.ENABLE_NOTES = ENABLE_NOTES
 app.state.config.ENABLE_COMMUNITY_SHARING = ENABLE_COMMUNITY_SHARING
@@ -839,6 +845,9 @@ app.state.config.FILE_IMAGE_COMPRESSION_HEIGHT = FILE_IMAGE_COMPRESSION_HEIGHT
 app.state.config.RAG_FULL_CONTEXT = RAG_FULL_CONTEXT
 app.state.config.BYPASS_EMBEDDING_AND_RETRIEVAL = BYPASS_EMBEDDING_AND_RETRIEVAL
 app.state.config.ENABLE_RAG_HYBRID_SEARCH = ENABLE_RAG_HYBRID_SEARCH
+app.state.config.ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS = (
+    ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS
+)
 app.state.config.ENABLE_WEB_LOADER_SSL_VERIFICATION = ENABLE_WEB_LOADER_SSL_VERIFICATION
 
 app.state.config.CONTENT_EXTRACTION_ENGINE = CONTENT_EXTRACTION_ENGINE
@@ -859,20 +868,11 @@ app.state.config.EXTERNAL_DOCUMENT_LOADER_URL = EXTERNAL_DOCUMENT_LOADER_URL
 app.state.config.EXTERNAL_DOCUMENT_LOADER_API_KEY = EXTERNAL_DOCUMENT_LOADER_API_KEY
 app.state.config.TIKA_SERVER_URL = TIKA_SERVER_URL
 app.state.config.DOCLING_SERVER_URL = DOCLING_SERVER_URL
+app.state.config.DOCLING_API_KEY = DOCLING_API_KEY
 app.state.config.DOCLING_PARAMS = DOCLING_PARAMS
-app.state.config.DOCLING_DO_OCR = DOCLING_DO_OCR
-app.state.config.DOCLING_FORCE_OCR = DOCLING_FORCE_OCR
-app.state.config.DOCLING_OCR_ENGINE = DOCLING_OCR_ENGINE
-app.state.config.DOCLING_OCR_LANG = DOCLING_OCR_LANG
-app.state.config.DOCLING_PDF_BACKEND = DOCLING_PDF_BACKEND
-app.state.config.DOCLING_TABLE_MODE = DOCLING_TABLE_MODE
-app.state.config.DOCLING_PIPELINE = DOCLING_PIPELINE
-app.state.config.DOCLING_DO_PICTURE_DESCRIPTION = DOCLING_DO_PICTURE_DESCRIPTION
-app.state.config.DOCLING_PICTURE_DESCRIPTION_MODE = DOCLING_PICTURE_DESCRIPTION_MODE
-app.state.config.DOCLING_PICTURE_DESCRIPTION_LOCAL = DOCLING_PICTURE_DESCRIPTION_LOCAL
-app.state.config.DOCLING_PICTURE_DESCRIPTION_API = DOCLING_PICTURE_DESCRIPTION_API
 app.state.config.DOCUMENT_INTELLIGENCE_ENDPOINT = DOCUMENT_INTELLIGENCE_ENDPOINT
 app.state.config.DOCUMENT_INTELLIGENCE_KEY = DOCUMENT_INTELLIGENCE_KEY
+app.state.config.DOCUMENT_INTELLIGENCE_MODEL = DOCUMENT_INTELLIGENCE_MODEL
 app.state.config.MISTRAL_OCR_API_BASE_URL = MISTRAL_OCR_API_BASE_URL
 app.state.config.MISTRAL_OCR_API_KEY = MISTRAL_OCR_API_KEY
 app.state.config.MINERU_API_MODE = MINERU_API_MODE
@@ -889,6 +889,7 @@ app.state.config.CHUNK_OVERLAP = CHUNK_OVERLAP
 app.state.config.RAG_EMBEDDING_ENGINE = RAG_EMBEDDING_ENGINE
 app.state.config.RAG_EMBEDDING_MODEL = RAG_EMBEDDING_MODEL
 app.state.config.RAG_EMBEDDING_BATCH_SIZE = RAG_EMBEDDING_BATCH_SIZE
+app.state.config.ENABLE_ASYNC_EMBEDDING = ENABLE_ASYNC_EMBEDDING
 
 app.state.config.RAG_RERANKING_ENGINE = RAG_RERANKING_ENGINE
 app.state.config.RAG_RERANKING_MODEL = RAG_RERANKING_MODEL
@@ -958,6 +959,7 @@ app.state.config.EXA_API_KEY = EXA_API_KEY
 app.state.config.PERPLEXITY_API_KEY = PERPLEXITY_API_KEY
 app.state.config.PERPLEXITY_MODEL = PERPLEXITY_MODEL
 app.state.config.PERPLEXITY_SEARCH_CONTEXT_USAGE = PERPLEXITY_SEARCH_CONTEXT_USAGE
+app.state.config.PERPLEXITY_SEARCH_API_URL = PERPLEXITY_SEARCH_API_URL
 app.state.config.SOUGOU_API_SID = SOUGOU_API_SID
 app.state.config.SOUGOU_API_SK = SOUGOU_API_SK
 app.state.config.EXTERNAL_WEB_SEARCH_URL = EXTERNAL_WEB_SEARCH_URL
@@ -982,9 +984,7 @@ app.state.YOUTUBE_LOADER_TRANSLATION = None
 
 try:
     app.state.ef = get_ef(
-        app.state.config.RAG_EMBEDDING_ENGINE,
-        app.state.config.RAG_EMBEDDING_MODEL,
-        RAG_EMBEDDING_MODEL_AUTO_UPDATE,
+        app.state.config.RAG_EMBEDDING_ENGINE, app.state.config.RAG_EMBEDDING_MODEL
     )
     if (
         app.state.config.ENABLE_RAG_HYBRID_SEARCH
@@ -995,7 +995,6 @@ try:
             app.state.config.RAG_RERANKING_MODEL,
             app.state.config.RAG_EXTERNAL_RERANKER_URL,
             app.state.config.RAG_EXTERNAL_RERANKER_API_KEY,
-            RAG_RERANKING_MODEL_AUTO_UPDATE,
         )
     else:
         app.state.rf = None
@@ -1087,6 +1086,7 @@ app.state.config.IMAGE_STEPS = IMAGE_STEPS
 app.state.config.IMAGES_OPENAI_API_BASE_URL = IMAGES_OPENAI_API_BASE_URL
 app.state.config.IMAGES_OPENAI_API_VERSION = IMAGES_OPENAI_API_VERSION
 app.state.config.IMAGES_OPENAI_API_KEY = IMAGES_OPENAI_API_KEY
+app.state.config.IMAGES_OPENAI_API_PARAMS = IMAGES_OPENAI_API_PARAMS
 
 app.state.config.IMAGES_GEMINI_API_BASE_URL = IMAGES_GEMINI_API_BASE_URL
 app.state.config.IMAGES_GEMINI_API_KEY = IMAGES_GEMINI_API_KEY
@@ -1102,6 +1102,7 @@ app.state.config.COMFYUI_WORKFLOW = COMFYUI_WORKFLOW
 app.state.config.COMFYUI_WORKFLOW_NODES = COMFYUI_WORKFLOW_NODES
 
 
+app.state.config.ENABLE_IMAGE_EDIT = ENABLE_IMAGE_EDIT
 app.state.config.IMAGE_EDIT_ENGINE = IMAGE_EDIT_ENGINE
 app.state.config.IMAGE_EDIT_MODEL = IMAGE_EDIT_MODEL
 app.state.config.IMAGE_EDIT_SIZE = IMAGE_EDIT_SIZE
@@ -1206,6 +1207,7 @@ app.state.config.AUTOCOMPLETE_GENERATION_PROMPT_TEMPLATE = (
 app.state.config.AUTOCOMPLETE_GENERATION_INPUT_MAX_LENGTH = (
     AUTOCOMPLETE_GENERATION_INPUT_MAX_LENGTH
 )
+app.state.config.VOICE_MODE_PROMPT_TEMPLATE = VOICE_MODE_PROMPT_TEMPLATE
 
 
 ########################################
@@ -1214,7 +1216,11 @@ app.state.config.AUTOCOMPLETE_GENERATION_INPUT_MAX_LENGTH = (
 #
 ########################################
 
-app.state.MODELS = {}
+app.state.MODELS = MODELS
+
+# Add the middleware to the app
+if ENABLE_COMPRESSION_MIDDLEWARE:
+    app.add_middleware(CompressMiddleware)
 
 
 class RedirectMiddleware(BaseHTTPMiddleware):
@@ -1274,12 +1280,52 @@ class TeamsRedirectMiddleware(BaseHTTPMiddleware):
         return response
 
 # Add the middlewares to the app
-if ENABLE_COMPRESSION_MIDDLEWARE:
-    app.add_middleware(CompressMiddleware)
-
 app.add_middleware(TeamsRedirectMiddleware)
 app.add_middleware(RedirectMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
+
+
+class APIKeyRestrictionMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        auth_header = request.headers.get("Authorization")
+        token = None
+
+        if auth_header:
+            scheme, token = auth_header.split(" ")
+
+        # Only apply restrictions if an sk- API key is used
+        if token and token.startswith("sk-"):
+            # Check if restrictions are enabled
+            if request.app.state.config.ENABLE_API_KEYS_ENDPOINT_RESTRICTIONS:
+                allowed_paths = [
+                    path.strip()
+                    for path in str(
+                        request.app.state.config.API_KEYS_ALLOWED_ENDPOINTS
+                    ).split(",")
+                    if path.strip()
+                ]
+
+                request_path = request.url.path
+
+                # Match exact path or prefix path
+                is_allowed = any(
+                    request_path == allowed or request_path.startswith(allowed + "/")
+                    for allowed in allowed_paths
+                )
+
+                if not is_allowed:
+                    return JSONResponse(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        content={
+                            "detail": "API key not allowed to access this endpoint."
+                        },
+                    )
+
+        response = await call_next(request)
+        return response
+
+
+app.add_middleware(APIKeyRestrictionMiddleware)
 
 
 @app.middleware("http")
@@ -1297,7 +1343,7 @@ async def check_url(request: Request, call_next):
         request.headers.get("Authorization")
     )
 
-    request.state.enable_api_key = app.state.config.ENABLE_API_KEY
+    request.state.enable_api_keys = app.state.config.ENABLE_API_KEYS
     response = await call_next(request)
     process_time = int(time.time()) - start_time
     response.headers["X-Process-Time"] = str(process_time)
@@ -1372,7 +1418,7 @@ app.include_router(
 app.include_router(utils.router, prefix="/api/v1/utils", tags=["utils"])
 
 # SCIM 2.0 API for identity management
-if SCIM_ENABLED:
+if ENABLE_SCIM:
     app.include_router(scim.router, prefix="/api/v1/scim/v2", tags=["scim"])
 
 
@@ -1408,6 +1454,10 @@ async def get_models(
         # Filter out filter pipelines
         if "pipeline" in model and model["pipeline"].get("type", None) == "filter":
             continue
+
+        # Remove profile image URL to reduce payload size
+        if model.get("info", {}).get("meta", {}).get("profile_image_url"):
+            model["info"]["meta"].pop("profile_image_url", None)
 
         try:
             model_tags = [
@@ -1531,6 +1581,9 @@ async def chat_completion(
         reasoning_tags = form_data.get("params", {}).get("reasoning_tags")
 
         # Model Params
+        if model_info_params.get("stream_response") is not None:
+            form_data["stream"] = model_info_params.get("stream_response")
+
         if model_info_params.get("stream_delta_chunk_size"):
             stream_delta_chunk_size = model_info_params.get("stream_delta_chunk_size")
 
@@ -1541,6 +1594,7 @@ async def chat_completion(
             "user_id": user.id,
             "chat_id": form_data.pop("chat_id", None),
             "message_id": form_data.pop("id", None),
+            "parent_message_id": form_data.pop("parent_id", None),
             "session_id": form_data.pop("session_id", None),
             "filter_ids": form_data.pop("filter_ids", []),
             "tool_ids": form_data.get("tool_ids", None),
@@ -1597,6 +1651,7 @@ async def chat_completion(
                             metadata["chat_id"],
                             metadata["message_id"],
                             {
+                                "parentId": metadata.get("parent_message_id", None),
                                 "model": model_id,
                             },
                         )
@@ -1629,6 +1684,7 @@ async def chat_completion(
                             metadata["chat_id"],
                             metadata["message_id"],
                             {
+                                "parentId": metadata.get("parent_message_id", None),
                                 "error": {"content": str(e)},
                             },
                         )
@@ -1800,7 +1856,7 @@ async def get_app_config(request: Request):
             "auth_trusted_header": bool(app.state.AUTH_TRUSTED_EMAIL_HEADER),
             "enable_signup_password_confirmation": ENABLE_SIGNUP_PASSWORD_CONFIRMATION,
             "enable_ldap": app.state.config.ENABLE_LDAP,
-            "enable_api_key": app.state.config.ENABLE_API_KEY,
+            "enable_api_keys": app.state.config.ENABLE_API_KEYS,
             "enable_signup": app.state.config.ENABLE_SIGNUP,
             "enable_login_form": app.state.config.ENABLE_LOGIN_FORM,
             "enable_websocket": ENABLE_WEBSOCKET_SUPPORT,
@@ -1808,6 +1864,7 @@ async def get_app_config(request: Request):
             **(
                 {
                     "enable_direct_connections": app.state.config.ENABLE_DIRECT_CONNECTIONS,
+                    "enable_folders": app.state.config.ENABLE_FOLDERS,
                     "enable_channels": app.state.config.ENABLE_CHANNELS,
                     "enable_notes": app.state.config.ENABLE_NOTES,
                     "enable_web_search": app.state.config.ENABLE_WEB_SEARCH,
@@ -1838,6 +1895,7 @@ async def get_app_config(request: Request):
         **(
             {
                 "default_models": app.state.config.DEFAULT_MODELS,
+                "default_pinned_models": app.state.config.DEFAULT_PINNED_MODELS,
                 "default_prompt_suggestions": app.state.config.DEFAULT_PROMPT_SUGGESTIONS,
                 "user_count": user_count,
                 "code": {
@@ -1939,6 +1997,7 @@ async def update_webhook_url(form_data: UrlForm, user=Depends(get_admin_user)):
 async def get_app_version():
     return {
         "version": VERSION,
+        "deployment_id": DEPLOYMENT_ID,
     }
 
 
@@ -1978,7 +2037,10 @@ async def get_current_usage(user=Depends(get_verified_user)):
     This is an experimental endpoint and subject to change.
     """
     try:
-        return {"model_ids": get_models_in_use(), "user_ids": get_active_user_ids()}
+        return {
+            "model_ids": get_models_in_use(),
+            "user_count": Users.get_active_user_count(),
+        }
     except Exception as e:
         log.error(f"Error getting usage statistics: {e}")
         raise HTTPException(status_code=500, detail="Internal Server Error")
@@ -2041,7 +2103,7 @@ except Exception as e:
     )
 
 
-async def register_client(self, request, client_id: str) -> bool:
+async def register_client(request, client_id: str) -> bool:
     server_type, server_id = client_id.split(":", 1)
 
     connection = None
@@ -2354,19 +2416,19 @@ async def process_user_session(
         log.error("Missing email in user_data")
         raise HTTPException(400, detail="Invalid credentials: Missing email")
     
-    provider_sub = f"microsoft@{sub}"
+    provider = "microsoft"
     
     # Fetch profile image asynchronously
     picture_url = user_data.get(auth_manager_config.OAUTH_PICTURE_CLAIM, "/user.png")
     picture_url = await fetch_profile_image(picture_url, access_token, email)
 
     # Find or merge user account
-    user = Users.get_user_by_oauth_sub(provider_sub)
+    user = Users.get_user_by_oauth_sub(provider, sub)
     if not user and auth_manager_config.OAUTH_MERGE_ACCOUNTS_BY_EMAIL:
         user = Users.get_user_by_email(email)
         if user:
-            log.info(f"Merging account for email {email} with oauth_sub {provider_sub}")
-            Users.update_user_oauth_sub_by_id(user.id, provider_sub)
+            log.info(f"Merging account for email {email} with provider {provider} and sub {sub}")
+            Users.update_user_oauth_by_id(user.id, provider, sub)
 
     role = oauth_manager.get_user_role(user, user_data)
 
@@ -2378,13 +2440,21 @@ async def process_user_session(
         
         name = user_data.get(auth_manager_config.OAUTH_USERNAME_CLAIM, email.split("@")[0])
         log.info(f"Creating new user: email={email}, name={name}")
+        
+        # Create oauth data in the new format
+        oauth_data = {
+            provider: {
+                "sub": sub
+            }
+        }
+        
         user = Users.insert_new_user(
             id=str(uuid.uuid4()),
             email=email,
             name=name,
             profile_image_url=picture_url,
             role=role,
-            oauth_sub=provider_sub,
+            oauth=oauth_data,
         )
     else:
         # Update user role if it has changed
