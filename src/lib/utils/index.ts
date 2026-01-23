@@ -32,7 +32,7 @@ function escapeRegExp(string: string): string {
 	return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-export const replaceTokens = (content, sourceIds, char, user) => {
+export const replaceTokens = (content, char, user) => {
 	const tokens = [
 		{ regex: /{{char}}/gi, replacement: char },
 		{ regex: /{{user}}/gi, replacement: user },
@@ -66,30 +66,6 @@ export const replaceTokens = (content, sourceIds, char, user) => {
 				segment = segment.replace(regex, replacement);
 			}
 		});
-
-		if (Array.isArray(sourceIds)) {
-			// Match both [1], [2], and [1,2,3] forms
-			const multiRefRegex = /\[([\d,\s]+)\]/g;
-			segment = segment.replace(multiRefRegex, (match, group) => {
-				// Extract numbers like 1,2,3
-				const indices = group
-					.split(',')
-					.map((n) => parseInt(n.trim(), 10))
-					.filter((n) => !isNaN(n));
-
-				// Replace each index with a <source_id> tag
-				const sources = indices
-					.map((idx) => {
-						const sourceId = sourceIds[idx - 1];
-						return sourceId
-							? `<source_id data="${idx}" title="${encodeURIComponent(sourceId)}" />`
-							: `[${idx}]`;
-					})
-					.join('');
-
-				return sources;
-			});
-		}
 
 		return segment;
 	});
@@ -895,7 +871,9 @@ export const processDetails = (content) => {
 				attributes[attributeMatch[1]] = attributeMatch[2];
 			}
 
-			content = content.replace(match, `"${attributes.result}"`);
+			if (attributes.result) {
+				content = content.replace(match, `"${attributes.result}"`);
+			}
 		}
 	}
 
@@ -916,8 +894,8 @@ export const extractSentences = (text: string) => {
 		return placeholder;
 	});
 
-	// Split the modified text into sentences based on common punctuation marks, avoiding these blocks
-	let sentences = text.split(/(?<=[.!?])\s+/);
+	// Split the modified text into sentences based on common punctuation marks or newlines, avoiding these blocks
+	let sentences = text.split(/(?<=[.!?])\s+|\n+/);
 
 	// Restore code blocks and process sentences
 	sentences = sentences.map((sentence) => {
@@ -1271,6 +1249,11 @@ function resolveSchema(schemaRef, components, resolvedSchemas = new Set()) {
 export const convertOpenApiToToolPayload = (openApiSpec) => {
 	const toolPayload = [];
 
+	// Guard against invalid or non-OpenAPI specs (e.g., MCP-style configs)
+	if (!openApiSpec || !openApiSpec.paths) {
+		return toolPayload;
+	}
+
 	for (const [path, methods] of Object.entries(openApiSpec.paths)) {
 		for (const [method, operation] of Object.entries(methods)) {
 			if (operation?.operationId) {
@@ -1541,12 +1524,29 @@ export const extractContentFromFile = async (file: File) => {
 		});
 	}
 
+	async function extractDocxText(file: File) {
+		const [arrayBuffer, { default: mammoth }] = await Promise.all([
+			file.arrayBuffer(),
+			import('mammoth')
+		]);
+		const result = await mammoth.extractRawText({ arrayBuffer });
+		return result.value; // plain text
+	}
+
 	const type = file.type || '';
 	const ext = getExtension(file.name);
 
 	// PDF check
 	if (type === 'application/pdf' || ext === '.pdf') {
 		return await extractPdfText(file);
+	}
+
+	// DOCX check
+	if (
+		type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+		ext === '.docx'
+	) {
+		return await extractDocxText(file);
 	}
 
 	// Text check (plain or common text-based)
