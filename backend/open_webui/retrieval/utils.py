@@ -12,7 +12,10 @@ import re
 
 from urllib.parse import quote
 from huggingface_hub import snapshot_download
-from langchain.retrievers import ContextualCompressionRetriever, EnsembleRetriever
+from langchain_classic.retrievers import (
+    ContextualCompressionRetriever,
+    EnsembleRetriever,
+)
 from langchain_community.retrievers import BM25Retriever
 from langchain_core.documents import Document
 
@@ -37,9 +40,10 @@ from open_webui.retrieval.loaders.youtube import YoutubeLoader
 
 
 from open_webui.env import (
-    SRC_LOG_LEVELS,
+    AIOHTTP_CLIENT_TIMEOUT,
     OFFLINE_MODE,
     ENABLE_FORWARD_USER_INFO_HEADERS,
+    AIOHTTP_CLIENT_SESSION_SSL,
 )
 from open_webui.config import (
     RAG_EMBEDDING_QUERY_PREFIX,
@@ -48,7 +52,6 @@ from open_webui.config import (
 )
 
 log = logging.getLogger(__name__)
-log.setLevel(SRC_LOG_LEVELS["RAG"])
 
 
 from typing import Any
@@ -596,7 +599,9 @@ async def agenerate_openai_batch_embeddings(
         if ENABLE_FORWARD_USER_INFO_HEADERS and user:
             headers = include_user_info_headers(headers, user)
 
-        async with aiohttp.ClientSession(trust_env=True) as session:
+        async with aiohttp.ClientSession(
+            trust_env=True, timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT)
+        ) as session:
             async with session.post(
                 f"{url}/embeddings", headers=headers, json=form_data
             ) as r:
@@ -685,7 +690,9 @@ async def agenerate_azure_openai_batch_embeddings(
         if ENABLE_FORWARD_USER_INFO_HEADERS and user:
             headers = include_user_info_headers(headers, user)
 
-        async with aiohttp.ClientSession(trust_env=True) as session:
+        async with aiohttp.ClientSession(
+            trust_env=True, timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT)
+        ) as session:
             async with session.post(full_url, headers=headers, json=form_data) as r:
                 r.raise_for_status()
                 data = await r.json()
@@ -761,9 +768,14 @@ async def agenerate_ollama_batch_embeddings(
         if ENABLE_FORWARD_USER_INFO_HEADERS and user:
             headers = include_user_info_headers(headers, user)
 
-        async with aiohttp.ClientSession(trust_env=True) as session:
+        async with aiohttp.ClientSession(
+            trust_env=True, timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT)
+        ) as session:
             async with session.post(
-                f"{url}/api/embed", headers=headers, json=form_data
+                f"{url}/api/embed",
+                headers=headers,
+                json=form_data,
+                ssl=AIOHTTP_CLIENT_SESSION_SSL,
             ) as r:
                 r.raise_for_status()
                 data = await r.json()
@@ -792,7 +804,9 @@ def get_embedding_function(
             return await asyncio.to_thread(
                 (
                     lambda query, prefix=None: embedding_function.encode(
-                        query, **({"prompt": prefix} if prefix else {})
+                        query,
+                        batch_size=int(embedding_batch_size),
+                        **({"prompt": prefix} if prefix else {}),
                     ).tolist()
                 ),
                 query,
@@ -1237,6 +1251,200 @@ def get_model_path(model: str, update_model: bool = False):
         return model
 
 
+def generate_openai_batch_embeddings(
+    model: str,
+    texts: list[str],
+    url: str = "https://api.openai.com/v1",
+    key: str = "",
+    prefix: str = None,
+    user: UserModel = None,
+) -> Optional[list[list[float]]]:
+    try:
+        log.debug(
+            f"generate_openai_batch_embeddings:model {model} batch size: {len(texts)}"
+        )
+        json_data = {"input": texts, "model": model}
+        if isinstance(RAG_EMBEDDING_PREFIX_FIELD_NAME, str) and isinstance(prefix, str):
+            json_data[RAG_EMBEDDING_PREFIX_FIELD_NAME] = prefix
+
+        r = requests.post(
+            f"{url}/embeddings?api-version={OPENAI_EMBEDDINGS_API_VERSION}",
+            headers={
+                "Content-Type": "application/json",
+                "api-key": key,
+                # "Authorization": f"Bearer {key}",
+                **(
+                    {
+                        "X-OpenWebUI-User-Name": quote(user.name, safe=" "),
+                        "X-OpenWebUI-User-Id": user.id,
+                        "X-OpenWebUI-User-Email": user.email,
+                        "X-OpenWebUI-User-Role": user.role,
+                    }
+                    if ENABLE_FORWARD_USER_INFO_HEADERS and user
+                    else {}
+                ),
+            },
+            json=json_data,
+        )
+        r.raise_for_status()
+        data = r.json()
+        if "data" in data:
+            return [elem["embedding"] for elem in data["data"]]
+        else:
+            raise "Something went wrong :/"
+    except Exception as e:
+        log.exception(f"Error generating openai batch embeddings: {e}")
+        return None
+
+
+def generate_azure_openai_batch_embeddings(
+    model: str,
+    texts: list[str],
+    url: str,
+    key: str = "",
+    version: str = "",
+    prefix: str = None,
+    user: UserModel = None,
+) -> Optional[list[list[float]]]:
+    try:
+        log.debug(
+            f"generate_azure_openai_batch_embeddings:deployment {model} batch size: {len(texts)}"
+        )
+        json_data = {"input": texts}
+        if isinstance(RAG_EMBEDDING_PREFIX_FIELD_NAME, str) and isinstance(prefix, str):
+            json_data[RAG_EMBEDDING_PREFIX_FIELD_NAME] = prefix
+
+        url = f"{url}/openai/deployments/{model}/embeddings?api-version={version}"
+
+        for _ in range(5):
+            r = requests.post(
+                url,
+                headers={
+                    "Content-Type": "application/json",
+                    "api-key": key,
+                    **(
+                        {
+                            "X-OpenWebUI-User-Name": quote(user.name, safe=" "),
+                            "X-OpenWebUI-User-Id": user.id,
+                            "X-OpenWebUI-User-Email": user.email,
+                            "X-OpenWebUI-User-Role": user.role,
+                        }
+                        if ENABLE_FORWARD_USER_INFO_HEADERS and user
+                        else {}
+                    ),
+                },
+                json=json_data,
+            )
+            if r.status_code == 429:
+                retry = float(r.headers.get("Retry-After", "1"))
+                time.sleep(retry)
+                continue
+            r.raise_for_status()
+            data = r.json()
+            if "data" in data:
+                return [elem["embedding"] for elem in data["data"]]
+            else:
+                raise Exception("Something went wrong :/")
+        return None
+    except Exception as e:
+        log.exception(f"Error generating azure openai batch embeddings: {e}")
+        return None
+
+
+def generate_ollama_batch_embeddings(
+    model: str,
+    texts: list[str],
+    url: str,
+    key: str = "",
+    prefix: str = None,
+    user: UserModel = None,
+) -> Optional[list[list[float]]]:
+    try:
+        log.debug(
+            f"generate_ollama_batch_embeddings:model {model} batch size: {len(texts)}"
+        )
+        json_data = {"input": texts, "model": model}
+        if isinstance(RAG_EMBEDDING_PREFIX_FIELD_NAME, str) and isinstance(prefix, str):
+            json_data[RAG_EMBEDDING_PREFIX_FIELD_NAME] = prefix
+
+        r = requests.post(
+            f"{url}/api/embed",
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {key}",
+                **(
+                    {
+                        "X-OpenWebUI-User-Name": quote(user.name, safe=" "),
+                        "X-OpenWebUI-User-Id": user.id,
+                        "X-OpenWebUI-User-Email": user.email,
+                        "X-OpenWebUI-User-Role": user.role,
+                    }
+                    if ENABLE_FORWARD_USER_INFO_HEADERS
+                    else {}
+                ),
+            },
+            json=json_data,
+        )
+        r.raise_for_status()
+        data = r.json()
+
+        if "embeddings" in data:
+            return data["embeddings"]
+        else:
+            raise "Something went wrong :/"
+    except Exception as e:
+        log.exception(f"Error generating ollama batch embeddings: {e}")
+        return None
+
+
+def generate_embeddings(
+    engine: str,
+    model: str,
+    text: Union[str, list[str]],
+    prefix: Union[str, None] = None,
+    **kwargs,
+):
+    url = kwargs.get("url", "")
+    key = kwargs.get("key", "")
+    user = kwargs.get("user")
+
+    if prefix is not None and RAG_EMBEDDING_PREFIX_FIELD_NAME is None:
+        if isinstance(text, list):
+            text = [f"{prefix}{text_element}" for text_element in text]
+        else:
+            text = f"{prefix}{text}"
+
+    if engine == "ollama":
+        embeddings = generate_ollama_batch_embeddings(
+            **{
+                "model": model,
+                "texts": text if isinstance(text, list) else [text],
+                "url": url,
+                "key": key,
+                "prefix": prefix,
+                "user": user,
+            }
+        )
+        return embeddings[0] if isinstance(text, str) else embeddings
+    elif engine == "openai":
+        embeddings = generate_openai_batch_embeddings(
+            model, text if isinstance(text, list) else [text], url, key, prefix, user
+        )
+        return embeddings[0] if isinstance(text, str) else embeddings
+    elif engine == "azure_openai":
+        azure_api_version = kwargs.get("azure_api_version", "")
+        embeddings = generate_azure_openai_batch_embeddings(
+            model,
+            text if isinstance(text, list) else [text],
+            url,
+            key,
+            azure_api_version,
+            prefix,
+            user,
+        )
+        return embeddings[0] if isinstance(text, str) else embeddings
+
+
 import operator
 from typing import Optional, Sequence
 
@@ -1283,7 +1491,7 @@ class RerankCompressor(BaseDocumentCompressor):
 
         scores = None
         if reranking:
-            scores = self.reranking_function(query, documents)
+            scores = await asyncio.to_thread(self.reranking_function, query, documents)
         else:
             from sentence_transformers import util
 
