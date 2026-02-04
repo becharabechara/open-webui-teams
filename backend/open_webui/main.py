@@ -2519,19 +2519,19 @@ async def process_user_session(
         log.error("Missing email in user_data")
         raise HTTPException(400, detail="Invalid credentials: Missing email")
     
-    provider_sub = f"microsoft@{sub}"
+    provider = "microsoft"
     
     # Fetch profile image asynchronously
     picture_url = user_data.get(auth_manager_config.OAUTH_PICTURE_CLAIM, "/user.png")
     picture_url = await fetch_profile_image(picture_url, access_token, email)
 
     # Find or merge user account
-    user = Users.get_user_by_oauth_sub(provider_sub)
+    user = Users.get_user_by_oauth_sub(provider, sub)
     if not user and auth_manager_config.OAUTH_MERGE_ACCOUNTS_BY_EMAIL:
         user = Users.get_user_by_email(email)
         if user:
-            log.info(f"Merging account for email {email} with oauth_sub {provider_sub}")
-            Users.update_user_oauth_sub_by_id(user.id, provider_sub)
+            log.info(f"Merging account for email {email} with provider {provider} and sub {sub}")
+            Users.update_user_oauth_by_id(user.id, provider, sub)
 
     role = oauth_manager.get_user_role(user, user_data)
 
@@ -2543,13 +2543,21 @@ async def process_user_session(
         
         name = user_data.get(auth_manager_config.OAUTH_USERNAME_CLAIM, email.split("@")[0])
         log.info(f"Creating new user: email={email}, name={name}")
+        
+        # Create oauth data in the new format
+        oauth_data = {
+            provider: {
+                "sub": sub
+            }
+        }
+        
         user = Users.insert_new_user(
             id=str(uuid.uuid4()),
             email=email,
             name=name,
             profile_image_url=picture_url,
             role=role,
-            oauth_sub=provider_sub,
+            oauth=oauth_data,
         )
     else:
         # Update user role if it has changed
