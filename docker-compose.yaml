@@ -45,7 +45,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: bachbyte-open-webui:v0.8.7
+    image: bachbyte-open-webui:v0.9.0
     container_name: open-webui
     volumes:
       - open-webui:/app/backend/data
