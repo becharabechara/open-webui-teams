@@ -221,6 +221,12 @@
 
 		const res = await updateRAGConfig(localStorage.token, {
 			...RAGConfig,
+			// Convert null (from cleared number inputs) to empty string so the backend
+			// can distinguish "clear this field" from "don't change this field"
+			FILE_MAX_SIZE: RAGConfig.FILE_MAX_SIZE ?? '',
+			FILE_MAX_COUNT: RAGConfig.FILE_MAX_COUNT ?? '',
+			FILE_IMAGE_COMPRESSION_WIDTH: RAGConfig.FILE_IMAGE_COMPRESSION_WIDTH ?? '',
+			FILE_IMAGE_COMPRESSION_HEIGHT: RAGConfig.FILE_IMAGE_COMPRESSION_HEIGHT ?? '',
 			ALLOWED_FILE_EXTENSIONS: RAGConfig.ALLOWED_FILE_EXTENSIONS.split(',')
 				.map((ext) => ext.trim())
 				.filter((ext) => ext !== ''),
@@ -1178,6 +1184,23 @@
 									</div>
 								</div>
 							{/if}
+
+							<div class="  mb-2.5 flex w-full justify-between">
+								<div class=" self-center text-xs font-medium">
+									{$i18n.t('Reranking Batch Size')}
+								</div>
+
+								<div class="">
+									<input
+										bind:value={RAGConfig.RAG_RERANKING_BATCH_SIZE}
+										type="number"
+										class=" bg-transparent text-center w-14 outline-none"
+										min="1"
+										max="16000"
+										step="1"
+									/>
+								</div>
+							</div>
 
 							<div class="  mb-2.5 flex w-full justify-between">
 								<div class=" self-center text-xs font-medium">{$i18n.t('Top K')}</div>
