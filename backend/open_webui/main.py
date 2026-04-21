@@ -1372,20 +1372,25 @@ if ENABLE_COMPRESSION_MIDDLEWARE:
     app.add_middleware(CompressMiddleware)
 
 
-class TeamsRedirectMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        # Check if the request is a GET request to the root path
-        if request.method == "GET" and request.url.path == "/":
-            # Check for Teams in the User-Agent
-            user_agent = request.headers.get("User-Agent", "").lower()
-            is_teams = "teams" in user_agent
-            # Redirect to /teams if in Teams context
-            if is_teams:
-                return RedirectResponse(url="/teams")
-        
-        # Proceed with the normal flow for other requests
-        response = await call_next(request)
-        return response
+class TeamsRedirectMiddleware:
+    """Redirects GET / to /teams when the User-Agent indicates Microsoft Teams."""
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        if (
+            scope.get('type') == 'http'
+            and scope.get('method', '').upper() == 'GET'
+            and scope.get('path') == '/'
+        ):
+            headers = dict(scope.get('headers', []))
+            user_agent = headers.get(b'user-agent', b'').decode('latin-1', errors='replace').lower()
+            if 'teams' in user_agent:
+                response = RedirectResponse(url='/teams')
+                await response(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
 
 app.add_middleware(TeamsRedirectMiddleware)
 app.add_middleware(RedirectMiddleware)
