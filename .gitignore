@@ -317,3 +317,5 @@ cloudflared
 webui.db.backup
 .open-webui-postgres-migration
 open-webui-postres-migration/
+Custom_Functions/
+Custom_functions/
